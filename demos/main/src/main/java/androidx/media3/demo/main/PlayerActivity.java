@@ -18,6 +18,7 @@ package androidx.media3.demo.main;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
@@ -32,22 +33,31 @@ import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.media3.common.AdPlaybackState;
+import androidx.media3.common.AdViewProvider;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.ErrorMessageProvider;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.Metadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.util.Log;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSchemeDataSource;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.demo.main.ads.HlsInterstitialListener;
+import androidx.media3.demo.main.ads.TestDataSourceFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManagerProvider;
 import androidx.media3.exoplayer.drm.FrameworkMediaDrm;
+import androidx.media3.exoplayer.hls.HlsInterstitialsAdsLoader;
+import androidx.media3.exoplayer.hls.HlsManifest;
 import androidx.media3.exoplayer.ima.ImaAdsLoader;
 import androidx.media3.exoplayer.ima.ImaServerSideAdInsertionMediaSource;
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer.DecoderInitializationException;
@@ -64,7 +74,10 @@ import java.util.Collections;
 import java.util.List;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 
-/** An activity that plays media using {@link ExoPlayer}. */
+/**
+ * An activity that plays media using {@link ExoPlayer}.
+ */
+@UnstableApi
 public class PlayerActivity extends AppCompatActivity
     implements OnClickListener, PlayerView.ControllerVisibilityListener {
 
@@ -83,6 +96,7 @@ public class PlayerActivity extends AppCompatActivity
 
   private boolean isShowingTrackSelectionDialog;
   private Button selectTracksButton;
+  private HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader;
   private DataSource.Factory dataSourceFactory;
   private List<MediaItem> mediaItems;
   private TrackSelectionParameters trackSelectionParameters;
@@ -94,9 +108,11 @@ public class PlayerActivity extends AppCompatActivity
 
   // For ad playback only.
 
-  @Nullable private AdsLoader clientSideAdsLoader;
+  @Nullable
+  private AdsLoader clientSideAdsLoader;
 
-  @Nullable private ImaServerSideAdInsertionMediaSource.AdsLoader serverSideAdsLoader;
+  @Nullable
+  private ImaServerSideAdInsertionMediaSource.AdsLoader serverSideAdsLoader;
 
   private ImaServerSideAdInsertionMediaSource.AdsLoader.@MonotonicNonNull State
       serverSideAdsLoaderState;
@@ -282,6 +298,8 @@ public class PlayerActivity extends AppCompatActivity
       player.addAnalyticsListener(new EventLogger());
       player.setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true);
       player.setPlayWhenReady(startAutoPlay);
+      hlsInterstitialsAdsLoader.setPlayer(player);
+//      adsManager.setPlayer(player);
       playerView.setPlayer(player);
       configurePlayerWithServerSideAdsLoader();
       debugViewHelper = new DebugTextViewHelper(player, debugTextView);
@@ -303,12 +321,11 @@ public class PlayerActivity extends AppCompatActivity
 
   @OptIn(markerClass = UnstableApi.class) // DRM configuration
   private MediaSource.Factory createMediaSourceFactory() {
-    DefaultDrmSessionManagerProvider drmSessionManagerProvider =
-        new DefaultDrmSessionManagerProvider();
+    DefaultDrmSessionManagerProvider drmSessionManagerProvider = new DefaultDrmSessionManagerProvider();
     drmSessionManagerProvider.setDrmHttpDataSourceFactory(
         DemoUtil.getHttpDataSourceFactory(/* context= */ this));
-    ImaServerSideAdInsertionMediaSource.AdsLoader.Builder serverSideAdLoaderBuilder =
-        new ImaServerSideAdInsertionMediaSource.AdsLoader.Builder(/* context= */ this, playerView);
+    ImaServerSideAdInsertionMediaSource.AdsLoader.Builder serverSideAdLoaderBuilder = new ImaServerSideAdInsertionMediaSource.AdsLoader.Builder(/* context= */
+        this, playerView);
     if (serverSideAdsLoaderState != null) {
       serverSideAdLoaderBuilder.setAdsLoaderState(serverSideAdsLoaderState);
     }
@@ -318,12 +335,21 @@ public class PlayerActivity extends AppCompatActivity
             serverSideAdsLoader,
             new DefaultMediaSourceFactory(/* context= */ this)
                 .setDataSourceFactory(dataSourceFactory));
-    return new DefaultMediaSourceFactory(/* context= */ this)
-        .setDataSourceFactory(dataSourceFactory)
-        .setDrmSessionManagerProvider(drmSessionManagerProvider)
-        .setLocalAdInsertionComponents(
-            this::getClientSideAdsLoader, /* adViewProvider= */ playerView)
-        .setServerSideAdInsertionMediaSourceFactory(imaServerSideAdInsertionMediaSourceFactory);
+
+
+
+    TestDataSourceFactory testDataSourceFactory = new TestDataSourceFactory(dataSourceFactory);
+    hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(testDataSourceFactory);
+    hlsInterstitialsAdsLoader.addListener(new HlsInterstitialListener());
+
+    DefaultMediaSourceFactory defaultMediaSourceFactory = new DefaultMediaSourceFactory(this)
+        .setDataSourceFactory(testDataSourceFactory);
+
+    return new HlsInterstitialsAdsLoader.AdsMediaSourceFactory(
+        hlsInterstitialsAdsLoader,
+        null,
+        defaultMediaSourceFactory
+    );
   }
 
   @OptIn(markerClass = UnstableApi.class)
@@ -562,9 +588,17 @@ public class PlayerActivity extends AppCompatActivity
   private static List<MediaItem> createMediaItems(Intent intent, DownloadTracker downloadTracker) {
     List<MediaItem> mediaItems = new ArrayList<>();
     for (MediaItem item : IntentUtil.createMediaItemsFromIntent(intent)) {
+      MediaItem newItem =
+          item.buildUpon()
+                  .setAdsConfiguration(
+                      new MediaItem.AdsConfiguration.Builder(Uri.parse("hls://interstitials"))
+                          .setAdsId("ad-tag" + item.mediaId)
+                          .build())
+              .build();
+
       mediaItems.add(
           maybeSetDownloadProperties(
-              item, downloadTracker.getDownloadRequest(item.localConfiguration.uri)));
+              newItem, downloadTracker.getDownloadRequest(newItem.localConfiguration.uri)));
     }
     return mediaItems;
   }
