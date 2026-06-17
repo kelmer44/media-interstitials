@@ -869,6 +869,92 @@ public class HlsInterstitialsAdsLoaderTest {
   }
 
   @Test
+  public void handleContentTimelineChanged_liveServerShape_mapsBreakAfterThirdContentSegment()
+      throws IOException {
+    String playlistString =
+        "#EXTM3U\n"
+            + "#EXT-X-VERSION:7\n"
+            + "#EXT-X-TARGETDURATION:7\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:40.000Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "content-1.ts\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:46.037Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "content-2.ts\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:52.075Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "content-3.ts\n"
+            + "#EXT-X-DATERANGE:"
+            + "ID=\"ad-break\","
+            + "CLASS=\"com.apple.hls.interstitial\","
+            + "START-DATE=\"2020-01-02T21:55:58.112Z\","
+            + "X-ASSET-URI=\"http://example.com/interstitial.m3u8\","
+            + "X-RESUME-OFFSET=12.074666,"
+            + "X-PLAYOUT-LIMIT=12.074666,"
+            + "X-SNAP=\"OUT,IN\"\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:58.112Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "broadcast-ad-1.ts\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:56:04.149Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "broadcast-ad-2.ts\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:56:10.187Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "content-4.ts\n";
+
+    AdPlaybackState adPlaybackState =
+        callHandleContentTimelineChangedAndCaptureAdPlaybackState(
+            playlistString,
+            adsLoader,
+            /* windowIndex= */ 0,
+            /* windowPositionInPeriodUs= */ 0,
+            /* windowEndPositionInPeriodUs= */ C.TIME_END_OF_SOURCE);
+
+    AdPlaybackState.AdGroup adGroup = adPlaybackState.getAdGroup(/* adGroupIndex= */ 0);
+    assertThat(adGroup.timeUs).isEqualTo(18_111_999L);
+    assertThat(adGroup.contentResumeOffsetUs).isEqualTo(12_074_666L);
+    assertThat(adGroup.count).isEqualTo(1);
+    assertThat(adGroup.durationsUs[0]).isEqualTo(12_074_666L);
+    assertThat(adGroup.ids[0]).isEqualTo("ad-break");
+  }
+
+  @Test
+  public void handleContentTimelineChanged_liveFutureSnapOut_mapsToFutureStartDate()
+      throws IOException {
+    String playlistString =
+        "#EXTM3U\n"
+            + "#EXT-X-VERSION:7\n"
+            + "#EXT-X-TARGETDURATION:7\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:40.000Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "content-1.ts\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:46.037Z\n"
+            + "#EXTINF:6.037333,\n"
+            + "content-2.ts\n"
+            + "#EXT-X-DATERANGE:"
+            + "ID=\"ad-break\","
+            + "CLASS=\"com.apple.hls.interstitial\","
+            + "START-DATE=\"2020-01-02T21:55:58.112Z\","
+            + "X-ASSET-URI=\"http://example.com/interstitial.m3u8\","
+            + "X-RESUME-OFFSET=12.074666,"
+            + "X-PLAYOUT-LIMIT=12.074666,"
+            + "X-SNAP=\"OUT,IN\"\n";
+
+    List<AdPlaybackState> adPlaybackStates =
+        callHandleContentTimelineChangedForLiveAndCaptureAdPlaybackStates(
+            adsLoader,
+            /* startAdsLoader= */ true,
+            /* windowOffsetInFirstPeriodUs= */ 0,
+            playlistString);
+    assertThat(adPlaybackStates).hasSize(1);
+    AdPlaybackState adPlaybackState = adPlaybackStates.get(0);
+
+    AdPlaybackState.AdGroup adGroup = adPlaybackState.getAdGroup(/* adGroupIndex= */ 0);
+    assertThat(adGroup.timeUs).isEqualTo(18_112_000L);
+    assertThat(adGroup.timeUs).isGreaterThan(12_074_666L);
+  }
+
+  @Test
   public void handleContentTimelineChanged_3postRolls_mergedIntoSinglePostRollAdGroup()
       throws IOException {
     assertThat(

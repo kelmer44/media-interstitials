@@ -1700,7 +1700,10 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
         continue;
       }
       long resolvedStartTimeUs =
-          resolveInterstitialStartTimeUs(interstitial, mediaPlaylist, windowDefaultPositionUs);
+          isLive
+              ? resolveLiveInterstitialStartTimeUs(
+                  interstitial, mediaPlaylist, windowDefaultPositionUs)
+              : resolveInterstitialStartTimeUs(interstitial, mediaPlaylist, windowDefaultPositionUs);
       Log.d(
           "HLSTEST",
           "Discovered interstitial id="
@@ -1962,6 +1965,15 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     } else {
       return interstitial.startDateUnixUs;
     }
+  }
+
+  private static long resolveLiveInterstitialStartTimeUs(
+      Interstitial interstitial, HlsMediaPlaylist mediaPlaylist, long defaultPositionUs) {
+    if (interstitial.snapTypes.contains(SNAP_TYPE_OUT)
+        && interstitial.startDateUnixUs > mediaPlaylist.startTimeUs + mediaPlaylist.durationUs) {
+      return interstitial.startDateUnixUs;
+    }
+    return resolveInterstitialStartTimeUs(interstitial, mediaPlaylist, defaultPositionUs);
   }
 
   private static long resolveInterstitialResumeOffsetUs(
