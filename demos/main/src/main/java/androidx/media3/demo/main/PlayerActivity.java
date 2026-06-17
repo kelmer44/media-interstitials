@@ -15,13 +15,12 @@
  */
 package androidx.media3.demo.main;
 
-import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.text.TextUtils;
+import android.os.Handler;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.View;
@@ -34,12 +33,11 @@ import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.media3.common.AdPlaybackState;
-import androidx.media3.common.AdViewProvider;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.ErrorMessageProvider;
+import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.Metadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Timeline;
@@ -48,16 +46,17 @@ import androidx.media3.common.Tracks;
 import androidx.media3.common.util.Log;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
-import androidx.media3.datasource.DataSchemeDataSource;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.demo.main.ads.AdsManager;
+import androidx.media3.demo.main.ads.AdsWizzAssetListResolverDataSourceFactory;
 import androidx.media3.demo.main.ads.HlsInterstitialListener;
 import androidx.media3.demo.main.ads.TestDataSourceFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManagerProvider;
 import androidx.media3.exoplayer.drm.FrameworkMediaDrm;
+import androidx.media3.exoplayer.hls.HlsDebugInfo;
 import androidx.media3.exoplayer.hls.HlsInterstitialsAdsLoader;
-import androidx.media3.exoplayer.hls.HlsManifest;
 import androidx.media3.exoplayer.ima.ImaAdsLoader;
 import androidx.media3.exoplayer.ima.ImaServerSideAdInsertionMediaSource;
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer.DecoderInitializationException;
@@ -96,6 +95,7 @@ public class PlayerActivity extends AppCompatActivity
 
   private boolean isShowingTrackSelectionDialog;
   private Button selectTracksButton;
+  private AdsManager adsManager;
   private HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader;
   private DataSource.Factory dataSourceFactory;
   private List<MediaItem> mediaItems;
@@ -105,6 +105,9 @@ public class PlayerActivity extends AppCompatActivity
   private boolean startAutoPlay;
   private int startItemIndex;
   private long startPosition;
+  private boolean skippedInitialLiveJoinAds;
+  protected Button skipAdButton;
+  protected Button seekToAdButton;
 
   // For ad playback only.
 
@@ -127,6 +130,10 @@ public class PlayerActivity extends AppCompatActivity
     setContentView();
     debugRootView = findViewById(R.id.controls_root);
     debugTextView = findViewById(R.id.debug_text_view);
+    skipAdButton = findViewById(R.id.skipAd);
+    seekToAdButton = findViewById(R.id.seekToAd);
+    skipAdButton.setOnClickListener(this);
+    seekToAdButton.setOnClickListener(this);
     selectTracksButton = findViewById(R.id.select_tracks_button);
     selectTracksButton.setOnClickListener(this);
 
@@ -259,6 +266,12 @@ public class PlayerActivity extends AppCompatActivity
               /* onDismissListener= */ dismissedDialog -> isShowingTrackSelectionDialog = false);
       trackSelectionDialog.show(getSupportFragmentManager(), /* tag= */ null);
     }
+    else if (view == skipAdButton) {
+      adsManager.skipAd();
+    }
+    else if (view == seekToAdButton) {
+//      adsManager.seekToAd();
+    }
   }
 
   // PlayerView.ControllerVisibilityListener implementation
@@ -299,10 +312,13 @@ public class PlayerActivity extends AppCompatActivity
       player.setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true);
       player.setPlayWhenReady(startAutoPlay);
       hlsInterstitialsAdsLoader.setPlayer(player);
-//      adsManager.setPlayer(player);
-      playerView.setPlayer(player);
+      adsManager.setPlayer(player);
+      playerView.setPlayer(new ScrubbableForwardingPlayer(player, hlsInterstitialsAdsLoader));
+      playerView.setControllerShowTimeoutMs(0);
+      playerView.setControllerHideOnTouch(false);
+      playerView.showController();
       configurePlayerWithServerSideAdsLoader();
-      debugViewHelper = new DebugTextViewHelper(player, debugTextView);
+      debugViewHelper = new DemoDebugTextViewHelper(player, debugTextView);
       debugViewHelper.start();
     }
     boolean haveStartPosition = startItemIndex != C.INDEX_UNSET;
@@ -336,20 +352,31 @@ public class PlayerActivity extends AppCompatActivity
             new DefaultMediaSourceFactory(/* context= */ this)
                 .setDataSourceFactory(dataSourceFactory));
 
-
-
-    TestDataSourceFactory testDataSourceFactory = new TestDataSourceFactory(dataSourceFactory);
-    hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(testDataSourceFactory);
+    boolean useCustomDataSource = false;
+    Log.w("HLSTEST", "Using custom data source?" + useCustomDataSource);
+    if(!useCustomDataSource) {
+      TestDataSourceFactory testDataSourceFactory = new TestDataSourceFactory(dataSourceFactory);
+      hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(testDataSourceFactory);
+    }
+    else {
+      AdsWizzAssetListResolverDataSourceFactory adsWizzAssetListResolverDataSourceFactory = new AdsWizzAssetListResolverDataSourceFactory(
+          getApplicationContext());
+      hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(adsWizzAssetListResolverDataSourceFactory);
+    }
+    adsManager = new AdsManager(hlsInterstitialsAdsLoader);
     hlsInterstitialsAdsLoader.addListener(new HlsInterstitialListener());
 
     DefaultMediaSourceFactory defaultMediaSourceFactory = new DefaultMediaSourceFactory(this)
-        .setDataSourceFactory(testDataSourceFactory);
+        .setDataSourceFactory(dataSourceFactory);
 
-    return new HlsInterstitialsAdsLoader.AdsMediaSourceFactory(
-        hlsInterstitialsAdsLoader,
-        null,
-        defaultMediaSourceFactory
-    );
+    HlsInterstitialsAdsLoader.AdsMediaSourceFactory hlsAdsMediaSourceFactory =
+        new HlsInterstitialsAdsLoader.AdsMediaSourceFactory(
+            hlsInterstitialsAdsLoader,
+            null,
+            defaultMediaSourceFactory
+        );
+
+    return hlsAdsMediaSourceFactory;
   }
 
   @OptIn(markerClass = UnstableApi.class)
@@ -414,12 +441,15 @@ public class PlayerActivity extends AppCompatActivity
       updateTrackSelectorParameters();
       updateStartPosition();
       releaseServerSideAdsLoader();
+      adsManager.setPlayer(null);
       debugViewHelper.stop();
       debugViewHelper = null;
       player.release();
       player = null;
       playerView.setPlayer(/* player= */ null);
       mediaItems = Collections.emptyList();
+      HlsDebugInfo.clearCurrentChunk();
+      skippedInitialLiveJoinAds = false;
     }
     if (clientSideAdsLoader != null) {
       clientSideAdsLoader.setPlayer(null);
@@ -493,7 +523,132 @@ public class PlayerActivity extends AppCompatActivity
     Toast.makeText(getApplicationContext(), message, Toast.LENGTH_LONG).show();
   }
 
+  private final class DemoDebugTextViewHelper extends DebugTextViewHelper {
+
+    private final ExoPlayer player;
+
+    public DemoDebugTextViewHelper(ExoPlayer player, TextView textView) {
+      super(player, textView);
+      this.player = player;
+    }
+
+    public void refresh() {
+      updateAndPost();
+    }
+
+    @Override
+    protected String getPlayerStateString() {
+      @Nullable String currentChunkName = HlsDebugInfo.getCurrentChunkName();
+      return super.getPlayerStateString()
+          + " adState:"
+          + getAdStateString()
+          + " chunk:"
+          + (currentChunkName == null ? "-" : currentChunkName);
+    }
+
+    private String getAdStateString() {
+      if (!player.isPlayingAd()) {
+        return "content";
+      }
+      return "playing(group:"
+          + player.getCurrentAdGroupIndex()
+          + " ad:"
+          + player.getCurrentAdIndexInAdGroup()
+          + ")";
+    }
+  }
+  private static final class ScrubbableForwardingPlayer extends ForwardingPlayer {
+
+    private final ExoPlayer player;
+    private final HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader;
+    private final Handler handler;
+    private int pendingSeekGeneration;
+
+    public ScrubbableForwardingPlayer(
+        ExoPlayer player, HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader) {
+      super(player);
+      this.player = player;
+      this.hlsInterstitialsAdsLoader = hlsInterstitialsAdsLoader;
+      handler = new Handler(player.getApplicationLooper());
+    }
+
+    @Override
+    public boolean isCommandAvailable(@Player.Command int command) {
+      return command == Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM
+          || command == Player.COMMAND_SEEK_TO_MEDIA_ITEM
+          || super.isCommandAvailable(command);
+    }
+
+    @Override
+    public Player.Commands getAvailableCommands() {
+      return new Player.Commands.Builder()
+          .addAll(super.getAvailableCommands())
+          .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+          .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+          .build();
+    }
+
+    @Override
+    public void seekTo(long positionMs) {
+      seekToContentPosition(/* mediaItemIndex= */ C.INDEX_UNSET, positionMs);
+    }
+
+    @Override
+    public void seekTo(int mediaItemIndex, long positionMs) {
+      seekToContentPosition(mediaItemIndex, positionMs);
+    }
+
+    private void seekToContentPosition(int mediaItemIndex, long positionMs) {
+      if (!player.isPlayingAd()) {
+        if (mediaItemIndex == C.INDEX_UNSET) {
+          player.seekTo(positionMs);
+        } else {
+          player.seekTo(mediaItemIndex, positionMs);
+        }
+        return;
+      }
+
+      int seekGeneration = ++pendingSeekGeneration;
+      Log.d(
+          "HLSTEST",
+          "Deferring scrub seek until after ad. mediaItemIndex="
+              + mediaItemIndex
+              + " positionMs="
+              + positionMs);
+      hlsInterstitialsAdsLoader.skipCurrentAdGroup();
+      seekWhenContent(seekGeneration, mediaItemIndex, positionMs, /* remainingAttempts= */ 20);
+    }
+
+    private void seekWhenContent(
+        int seekGeneration, int mediaItemIndex, long positionMs, int remainingAttempts) {
+      handler.postDelayed(
+          () -> {
+            if (seekGeneration != pendingSeekGeneration) {
+              return;
+            }
+            if (!player.isPlayingAd()) {
+              if (mediaItemIndex == C.INDEX_UNSET) {
+                player.seekTo(positionMs);
+              } else {
+                player.seekTo(mediaItemIndex, positionMs);
+              }
+            } else if (remainingAttempts > 0) {
+              seekWhenContent(seekGeneration, mediaItemIndex, positionMs, remainingAttempts - 1);
+            } else {
+              Log.d("HLSTEST", "Dropping deferred scrub seek because playback is still in an ad");
+            }
+          },
+          50);
+    }
+  }
+
   private class PlayerEventListener implements Player.Listener {
+
+    @Override
+    public void onTimelineChanged(Timeline timeline, @Player.TimelineChangeReason int reason) {
+//      maybeSkipInitialLiveJoinAds(timeline);
+    }
+
 
     @Override
     public void onPlaybackStateChanged(@Player.State int playbackState) {
@@ -538,17 +693,7 @@ public class PlayerActivity extends AppCompatActivity
       if (playerView == null) {
         return;
       }
-      if (mediaItem == null) {
-        playerView.setTimeBarScrubbingEnabled(false);
-        return;
-      }
-      String uriScheme = mediaItem.localConfiguration.uri.getScheme();
-      playerView.setTimeBarScrubbingEnabled(
-          TextUtils.isEmpty(uriScheme)
-              || uriScheme.equals(ContentResolver.SCHEME_FILE)
-              || uriScheme.equals("asset")
-              || uriScheme.equals(DataSchemeDataSource.SCHEME_DATA)
-              || uriScheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE));
+      playerView.setTimeBarScrubbingEnabled(mediaItem != null);
     }
   }
 
@@ -590,10 +735,10 @@ public class PlayerActivity extends AppCompatActivity
     for (MediaItem item : IntentUtil.createMediaItemsFromIntent(intent)) {
       MediaItem newItem =
           item.buildUpon()
-                  .setAdsConfiguration(
-                      new MediaItem.AdsConfiguration.Builder(Uri.parse("hls://interstitials"))
-                          .setAdsId("ad-tag" + item.mediaId)
-                          .build())
+              .setAdsConfiguration(
+                  new MediaItem.AdsConfiguration.Builder(Uri.parse("hls://interstitials"))
+                      .setAdsId("ad-tag" + item.mediaId)
+                      .build())
               .build();
 
       mediaItems.add(

@@ -165,7 +165,7 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     public final long durationUs;
 
     /** Creates an instance. */
-    /* package */ Asset(Uri uri, long durationUs) {
+    /* package */ public Asset(Uri uri, long durationUs) {
       this.uri = uri;
       this.durationUs = durationUs;
     }
@@ -978,6 +978,30 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     if (window.manifest instanceof HlsManifest) {
       HlsMediaPlaylist mediaPlaylist = ((HlsManifest) window.manifest).mediaPlaylist;
       int assetListCount = contentMediaSourceAdDataHolder.getUnresolvedAssetListCount(adsId);
+      Log.d(
+          "HLSTEST",
+          "Content timeline update adsId="
+              + adsId
+              + " isLive="
+              + window.isLive()
+              + " windowDurationUs="
+              + window.durationUs
+              + " windowDefaultPositionUs="
+              + window.defaultPositionUs
+              + " positionInFirstPeriodUs="
+              + window.positionInFirstPeriodUs
+              + " playlistStartTimeUs="
+              + mediaPlaylist.startTimeUs
+              + " playlistDurationUs="
+              + mediaPlaylist.durationUs
+              + " targetDurationUs="
+              + mediaPlaylist.targetDurationUs
+              + " daterangeCount="
+              + mediaPlaylist.interstitials.size()
+              + " adGroupCountBefore="
+              + adPlaybackState.adGroupCount
+              + " unresolvedAssetListsBefore="
+              + assetListCount);
       adPlaybackState =
           window.isLive()
               ? mapInterstitialsForLive(
@@ -993,6 +1017,16 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
                   window.durationUs,
                   window.positionInFirstPeriodUs,
                   window.defaultPositionUs);
+      Log.d(
+          "HLSTEST",
+          "Mapped content timeline adsId="
+              + adsId
+              + " adGroupCountAfter="
+              + adPlaybackState.adGroupCount
+              + " removedAdGroupCount="
+              + adPlaybackState.removedAdGroupCount
+              + " unresolvedAssetListsAfter="
+              + contentMediaSourceAdDataHolder.getUnresolvedAssetListCount(adsId));
       Player player = this.player;
       if (assetListCount != contentMediaSourceAdDataHolder.getUnresolvedAssetListCount(adsId)
           && player != null
@@ -1011,6 +1045,18 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
           int adGroupIndex =
               adPlaybackState.getAdGroupIndexForPositionUs(
                   startPositionUs, window.isLive() ? C.TIME_UNSET : window.durationUs);
+          Log.d(
+              "HLSTEST",
+              "Join/start position lookup adsId="
+                  + adsId
+                  + " startPositionUs="
+                  + startPositionUs
+                  + " windowDefaultPositionUs="
+                  + window.defaultPositionUs
+                  + " contentPositionUsBeforeAdjustment="
+                  + contentPositionUs
+                  + " selectedAdGroup="
+                  + getAdGroupForLog(adPlaybackState, adGroupIndex));
           // If there is an ad before or at the start position, the player starts playing the ad.
           contentPositionUs =
               adGroupIndex != C.INDEX_UNSET
@@ -1018,6 +1064,16 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
                   : startPositionUs;
           publicPositionInFirstPeriod = window.positionInFirstPeriodUs;
         }
+        Log.d(
+            "HLSTEST",
+            "Scheduling asset-list resolution from timeline update adsId="
+                + adsId
+                + " publicPeriodIsPlaceholder="
+                + publicPeriod.isPlaceholder
+                + " publicPositionInFirstPeriodUs="
+                + publicPositionInFirstPeriod
+                + " windowPositionUs="
+                + contentPositionUs);
         maybeExecuteOrSetNextAssetListResolutionMessage(
             adsId, timeline, /* windowIndex= */ 0, publicPositionInFirstPeriod, contentPositionUs);
       }
@@ -1127,8 +1183,55 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
 
   // private methods
 
+  private static String getAdIdForLog(
+      @Nullable AdPlaybackState adPlaybackState, int adGroupIndex, int adIndexInAdGroup) {
+    if (adPlaybackState == null
+        || adGroupIndex == C.INDEX_UNSET
+        || adIndexInAdGroup == C.INDEX_UNSET
+        || adGroupIndex >= adPlaybackState.adGroupCount) {
+      return "?";
+    }
+    AdPlaybackState.AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndex);
+    return adIndexInAdGroup < adGroup.ids.length && adGroup.ids[adIndexInAdGroup] != null
+        ? castNonNull(adGroup.ids[adIndexInAdGroup])
+        : "?";
+  }
+
+  private static String getAdGroupForLog(
+      @Nullable AdPlaybackState adPlaybackState, int adGroupIndex) {
+    if (adPlaybackState == null
+        || adGroupIndex == C.INDEX_UNSET
+        || adGroupIndex >= adPlaybackState.adGroupCount) {
+      return "?";
+    }
+    AdPlaybackState.AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndex);
+    String firstAdId = adGroup.ids.length > 0 && adGroup.ids[0] != null ? adGroup.ids[0] : "?";
+    return "index="
+        + adGroupIndex
+        + ", timeUs="
+        + adGroup.timeUs
+        + ", count="
+        + adGroup.count
+        + ", resumeOffsetUs="
+        + adGroup.contentResumeOffsetUs
+        + ", firstAdId="
+        + firstAdId;
+  }
+
   private void startLoadingAssetList(AssetListData assetListData) {
     cancelPendingAssetListResolutionMessage();
+    Log.d(
+        "HLSTEST",
+        "Loading asset list interstitialId="
+            + assetListData.interstitial.id
+            + " adsId="
+            + assetListData.adsId
+            + " adGroup="
+            + assetListData.adGroupIndex
+            + " adIndex="
+            + assetListData.adIndexInAdGroup
+            + " uri="
+            + assetListData.interstitial.assetListUri);
     getLoader()
         .startLoading(
             new ParsingLoadable<>(
@@ -1154,13 +1257,31 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       long positionInFirstPeriodUs,
       long windowPositionUs) {
     if (loader != null && loader.isLoading()) {
+      Log.d(
+          "HLSTEST",
+          "Asset-list resolution skipped because loader is already loading adsId=" + adsId);
       return;
     }
     cancelPendingAssetListResolutionMessage();
     Window window = contentTimeline.getWindow(windowIndex, new Window());
     long currentPeriodPositionUs = positionInFirstPeriodUs + windowPositionUs;
+    Log.d(
+        "HLSTEST",
+        "Asset-list resolution lookup adsId="
+            + adsId
+            + " windowIndex="
+            + windowIndex
+            + " positionInFirstPeriodUs="
+            + positionInFirstPeriodUs
+            + " windowPositionUs="
+            + windowPositionUs
+            + " currentPeriodPositionUs="
+            + currentPeriodPositionUs);
     RunnableAtPosition nextAssetResolution = getNextAssetResolution(adsId, currentPeriodPositionUs);
     if (nextAssetResolution == null) {
+      Log.d(
+          "HLSTEST",
+          "Asset-list resolution lookup found no unresolved interstitial adsId=" + adsId);
       return;
     }
 
@@ -1174,8 +1295,21 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
             currentPeriodPositionUs,
             resolutionStartTimeUs
                 - (TARGET_DURATION_MULTIPLIER * nextAssetResolution.targetDurationUs));
+    Log.d(
+        "HLSTEST",
+        "Asset-list resolution selected adsId="
+            + adsId
+            + " adStartTimeUs="
+            + nextAssetResolution.adStartTimeUs
+            + " targetDurationUs="
+            + nextAssetResolution.targetDurationUs
+            + " resolutionStartTimeUs="
+            + resolutionStartTimeUs
+            + " currentPeriodPositionUs="
+            + currentPeriodPositionUs);
     if (resolutionStartTimeUs - currentPeriodPositionUs < 200_000L) {
       // Start loading immediately.
+      Log.d("HLSTEST", "Asset-list resolution starting immediately adsId=" + adsId);
       nextAssetResolution.run();
     } else {
       long messagePositionUs = resolutionStartTimeUs - positionInFirstPeriodUs;
@@ -1184,6 +1318,15 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       Period period = contentTimeline.getPeriod(/* periodIndex= */ 0, new Period());
       int adGroupIndexForResolutionStartTime =
           adPlaybackState.getAdGroupIndexForPositionUs(resolutionStartTimeUs, period.durationUs);
+
+      Log.d(
+          "HLSTEST",
+          "Resolution message position lookup adsId="
+              + adsId
+              + " resolutionStartTimeUs="
+              + resolutionStartTimeUs
+              + " selectedAdGroup="
+              + getAdGroupForLog(adPlaybackState, adGroupIndexForResolutionStartTime));
       if (adGroupIndexForResolutionStartTime != C.INDEX_UNSET) {
         AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndexForResolutionStartTime);
         long resumePositionOfPreviousAd = adGroup.timeUs + adGroup.contentResumeOffsetUs;
@@ -1191,6 +1334,14 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
         messagePositionUs =
             max(messagePositionUs, resumePositionOfPreviousAd - positionInFirstPeriodUs);
       }
+      Log.d(
+          "HLSTEST",
+          "Asset-list resolution scheduled adsId="
+              + adsId
+              + " messagePositionUs="
+              + messagePositionUs
+              + " messagePositionMs="
+              + max(usToMs(messagePositionUs), 0));
       pendingAssetListResolutionMessage =
           checkNotNull(player)
               .createMessage((messageType, message) -> nextAssetResolution.run())
@@ -1205,9 +1356,45 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
   private RunnableAtPosition getNextAssetResolution(Object adsId, long periodPositionUs) {
     Map<Long, AssetListData> assetListDataMap =
         checkNotNull(contentMediaSourceAdDataHolder.getUnresolvedAssetLists(adsId));
+    Log.d(
+        "HLSTEST",
+        "Searching unresolved asset lists adsId="
+            + adsId
+            + " periodPositionUs="
+            + periodPositionUs
+            + " count="
+            + assetListDataMap.size());
     for (Long assetListTimeUs : assetListDataMap.keySet()) {
+      AssetListData assetListData = checkNotNull(assetListDataMap.get(assetListTimeUs));
+      Log.d(
+          "HLSTEST",
+          "Unresolved asset-list candidate adsId="
+              + adsId
+              + " interstitialId="
+              + assetListData.interstitial.id
+              + " assetListTimeUs="
+              + assetListTimeUs
+              + " adGroup="
+              + assetListData.adGroupIndex
+              + " adIndex="
+              + assetListData.adIndexInAdGroup
+              + " periodPositionUs="
+              + periodPositionUs
+              + " eligible="
+              + (periodPositionUs <= assetListTimeUs));
       if (periodPositionUs <= assetListTimeUs) {
-        AssetListData assetListData = checkNotNull(assetListDataMap.get(assetListTimeUs));
+        Log.d(
+            "HLSTEST",
+            "Selected unresolved asset-list adsId="
+                + adsId
+                + " interstitialId="
+                + assetListData.interstitial.id
+                + " assetListTimeUs="
+                + assetListTimeUs
+                + " adGroup="
+                + assetListData.adGroupIndex
+                + " adIndex="
+                + assetListData.adIndexInAdGroup);
         return new RunnableAtPosition(
             /* adStartTimeUs= */ assetListTimeUs,
             assetListData.targetDurationUs,
@@ -1237,6 +1424,17 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       return C.TIME_UNSET;
     }
     int adGroupIndex = adPlaybackState.getAdGroupIndexForPositionUs(periodPositionUs, C.TIME_UNSET);
+
+    Log.d(
+        "HLSTEST",
+        "Unresolved asset-list position lookup contentPositionUs="
+            + contentPositionUs
+            + " periodPositionUs="
+            + periodPositionUs
+            + " periodPositionInWindowUs="
+            + period.positionInWindowUs
+            + " selectedAdGroup="
+            + getAdGroupForLog(adPlaybackState, adGroupIndex));
     if (adGroupIndex != C.INDEX_UNSET) {
       // Seek adjustment will snap to a playable ad behind the seek position.
       AdPlaybackState.AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndex);
@@ -1244,9 +1442,23 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
           contentMediaSourceAdDataHolder.getUnresolvedAssetLists(adPlaybackState.adsId);
       if (unresolvedAssets != null && unresolvedAssets.containsKey(adGroup.timeUs)) {
         Window window = timeline.getWindow(period.windowIndex, new Window());
-        return adGroup.timeUs - window.positionInFirstPeriodUs;
+        long assetListWindowPositionUs = adGroup.timeUs - window.positionInFirstPeriodUs;
+        Log.d(
+            "HLSTEST",
+            "Unresolved asset-list position lookup returning ad cue window position adsId="
+                + adPlaybackState.adsId
+                + " adGroup="
+                + adGroupIndex
+                + " adTimeUs="
+                + adGroup.timeUs
+                + " windowPositionInFirstPeriodUs="
+                + window.positionInFirstPeriodUs
+                + " assetListWindowPositionUs="
+                + assetListWindowPositionUs);
+        return assetListWindowPositionUs;
       }
     }
+    Log.d("HLSTEST", "Unresolved asset-list position lookup found no unresolved cue");
     return C.TIME_UNSET;
   }
 
@@ -1267,6 +1479,14 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     @Nullable
     AdPlaybackState oldAdPlaybackState =
         contentMediaSourceAdDataHolder.putAdPlaybackState(adsId, adPlaybackState);
+    Log.d(
+        "HLSTEST",
+        "AdPlaybackState update adsId="
+            + adsId
+            + " changed="
+            + !adPlaybackState.equals(oldAdPlaybackState)
+            + " state="
+            + adPlaybackState);
     if (!adPlaybackState.equals(oldAdPlaybackState)) {
       @Nullable
       EventListener eventListener = contentMediaSourceAdDataHolder.getEventListener(adsId);
@@ -1368,6 +1588,24 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
           }
           adPlaybackState = adPlaybackState.withNewAdGroup(insertionIndex, timeUs);
         }
+        Log.d(
+            "HLSTEST",
+            "Mapping live interstitial id="
+                + interstitial.id
+                + " adsId="
+                + adsId
+                + " adGroup="
+                + insertionIndex
+                + " isNewGroup="
+                + isNewAdGroup
+                + " timeUs="
+                + timeUs
+                + " positionInPlaylistWindowUs="
+                + positionInPlaylistWindowUs
+                + " playlistStartTimeUs="
+                + mediaPlaylist.startTimeUs
+                + " playlistDurationUs="
+                + mediaPlaylist.durationUs);
         adPlaybackState =
             insertOrUpdateInterstitialInAdGroup(
                 mediaPlaylist,
@@ -1377,6 +1615,21 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
                 /* adGroupIndex= */ insertionIndex,
                 mediaPlaylist.targetDurationUs);
         contentMediaSourceAdDataHolder.addInsertedInterstitialId(adsId, interstitial.id);
+        AdPlaybackState.AdGroup insertedAdGroup = adPlaybackState.getAdGroup(insertionIndex);
+        Log.d(
+            "HLSTEST",
+            "Inserted live interstitial id="
+                + interstitial.id
+                + " adsId="
+                + adsId
+                + " adGroup="
+                + insertionIndex
+                + " count="
+                + insertedAdGroup.count
+                + " timeUs="
+                + insertedAdGroup.timeUs
+                + " contentResumeOffsetUs="
+                + insertedAdGroup.contentResumeOffsetUs);
       }
     }
     return maybeResolvePendingSnapInResolutions(adPlaybackState, mediaPlaylist);
@@ -1430,12 +1683,36 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     LongSparseArray<List<Interstitial>> filteredInterstitials = new LongSparseArray<>();
     for (int i = 0; i < interstitials.size(); i++) {
       Interstitial interstitial = interstitials.get(i);
-      if (contentMediaSourceAdDataHolder.isInsertedInterstitialId(adsId, interstitial.id)
-          || (isLive && interstitial.cue.contains(CUE_TRIGGER_POST))) {
+      boolean alreadyInserted =
+          contentMediaSourceAdDataHolder.isInsertedInterstitialId(adsId, interstitial.id);
+      boolean unsupportedLivePostroll = isLive && interstitial.cue.contains(CUE_TRIGGER_POST);
+      if (alreadyInserted || unsupportedLivePostroll) {
+        Log.d(
+            "HLSTEST",
+            "Ignoring interstitial id="
+                + interstitial.id
+                + " adsId="
+                + adsId
+                + " alreadyInserted="
+                + alreadyInserted
+                + " unsupportedLivePostroll="
+                + unsupportedLivePostroll);
         continue;
       }
       long resolvedStartTimeUs =
           resolveInterstitialStartTimeUs(interstitial, mediaPlaylist, windowDefaultPositionUs);
+      Log.d(
+          "HLSTEST",
+          "Discovered interstitial id="
+              + interstitial.id
+              + " adsId="
+              + adsId
+              + " resolvedStartTimeUs="
+              + resolvedStartTimeUs
+              + " playlistStartTimeUs="
+              + mediaPlaylist.startTimeUs
+              + " playlistDurationUs="
+              + mediaPlaylist.durationUs);
       List<Interstitial> interstitialsAtSameStartTime =
           filteredInterstitials.indexOfKey(resolvedStartTimeUs) < 0
               ? new ArrayList<>()
@@ -1490,6 +1767,8 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
                 : interstitialStartTimeUs - mediaPlaylist.startTimeUs;
         int adGroupIndex =
             adPlaybackState.getAdGroupIndexForPositionUs(timeUs, mediaPlaylist.durationUs);
+
+        Log.i("HLSTEST", "Found adGroupIndex = " + adGroupIndex + "in map Interstitials for Vod");
         if (adGroupIndex == C.INDEX_UNSET) {
           // There is no ad group before or at the interstitials position.
           adGroupIndex = adPlaybackState.removedAdGroupCount;
@@ -1581,19 +1860,58 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     }
 
     if (interstitial.assetUri != null) {
+      Log.d(
+          "HLSTEST",
+          "Interstitial uses X-ASSET-URI id="
+              + interstitial.id
+              + " adsId="
+              + adPlaybackState.adsId
+              + " adGroup="
+              + adGroupIndex
+              + " adIndex="
+              + adIndexInAdGroup
+              + " assetUri="
+              + interstitial.assetUri
+              + " resumeOffsetUs="
+              + resumeOffsetUs
+              + " durationUs="
+              + interstitialDurationUs
+              + " playoutLimitUs="
+              + interstitial.playoutLimitUs);
       adPlaybackState =
           adPlaybackState.withAvailableAdMediaItem(
               adGroupIndex,
               adIndexInAdGroup,
               new MediaItem.Builder()
                   .setUri(interstitial.assetUri)
-                  .setMimeType(MimeTypes.APPLICATION_M3U8)
+//                  .setMimeType(MimeTypes.APPLICATION_M3U8)
                   .build());
     } else {
       Object adsId = checkNotNull(adPlaybackState.adsId);
+      long assetListTimeUs = adGroup.timeUs != C.TIME_END_OF_SOURCE ? adGroup.timeUs : Long.MAX_VALUE;
+      Log.d(
+          "HLSTEST",
+          "Interstitial uses X-ASSET-LIST id="
+              + interstitial.id
+              + " adsId="
+              + adsId
+              + " adGroup="
+              + adGroupIndex
+              + " adIndex="
+              + adIndexInAdGroup
+              + " assetListTimeUs="
+              + assetListTimeUs
+              + " assetListUri="
+              + interstitial.assetListUri
+              + " resumeOffsetUs="
+              + resumeOffsetUs
+              + " durationUs="
+              + interstitialDurationUs
+              + " playoutLimitUs="
+              + interstitial.playoutLimitUs);
       checkNotNull(contentMediaSourceAdDataHolder.getUnresolvedAssetLists(adsId))
           .put(
-              adGroup.timeUs != C.TIME_END_OF_SOURCE ? adGroup.timeUs : Long.MAX_VALUE,
+              assetListTimeUs,
               new AssetListData(
                   mediaItem,
                   adsId,
@@ -1767,6 +2085,19 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
         }
         if (newPosition.adIndexInAdGroup != C.INDEX_UNSET) {
           contentMediaSourceAdDataHolder.notifyAdStarted(adsId);
+          Log.d(
+              "HLSTEST",
+              "Ad started reason=AUTO_TRANSITION adsId="
+                  + adsId
+                  + " adGroup="
+                  + newPosition.adGroupIndex
+                  + " adIndex="
+                  + newPosition.adIndexInAdGroup
+                  + " adId="
+                  + getAdIdForLog(
+                      adPlaybackState, newPosition.adGroupIndex, newPosition.adIndexInAdGroup)
+                  + " contentPositionMs="
+                  + newPosition.contentPositionMs);
           notifyListeners(
               listener ->
                   listener.onAdStarted(
@@ -1792,6 +2123,21 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
         if (oldPosition.adIndexInAdGroup == C.INDEX_UNSET
             && newPosition.adIndexInAdGroup != C.INDEX_UNSET) {
           // An ad started after the user sought beyond an ad cue point.
+          Log.d(
+              "HLSTEST",
+              "Ad started reason="
+                  + (reason == DISCONTINUITY_REASON_SEEK ? "SEEK" : "SEEK_ADJUSTMENT")
+                  + " adsId="
+                  + adsId
+                  + " adGroup="
+                  + newPosition.adGroupIndex
+                  + " adIndex="
+                  + newPosition.adIndexInAdGroup
+                  + " adId="
+                  + getAdIdForLog(
+                      adPlaybackState, newPosition.adGroupIndex, newPosition.adIndexInAdGroup)
+                  + " contentPositionMs="
+                  + newPosition.contentPositionMs);
           notifyListeners(
               listener ->
                   listener.onAdStarted(
@@ -1821,6 +2167,21 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       @Nullable Object adsId = period.adPlaybackState.adsId;
       if (adsId != null && contentMediaSourceAdDataHolder.awaitingFirstAdToStartFor(adsId)) {
         contentMediaSourceAdDataHolder.notifyAdStarted(adsId);
+        Log.d(
+            "HLSTEST",
+            "Ad started reason=READY adsId="
+                + adsId
+                + " adGroup="
+                + player.getCurrentAdGroupIndex()
+                + " adIndex="
+                + player.getCurrentAdIndexInAdGroup()
+                + " adId="
+                + getAdIdForLog(
+                    period.adPlaybackState,
+                    player.getCurrentAdGroupIndex(),
+                    player.getCurrentAdIndexInAdGroup())
+                + " contentPositionMs="
+                + player.getContentPosition());
         notifyListeners(
             listener ->
                 listener.onAdStarted(
@@ -1838,6 +2199,16 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       if (adPlaybackState != null
           && adPlaybackState.getAdGroup(adGroupIndex).states[adIndexInAdGroup]
               == AD_STATE_AVAILABLE) {
+        Log.d(
+            "HLSTEST",
+            "Ad completed adsId="
+                + adsId
+                + " adGroup="
+                + adGroupIndex
+                + " adIndex="
+                + adIndexInAdGroup
+                + " adId="
+                + getAdIdForLog(adPlaybackState, adGroupIndex, adIndexInAdGroup));
         adPlaybackState = adPlaybackState.withPlayedAd(adGroupIndex, adIndexInAdGroup);
         putAndNotifyAdPlaybackStateUpdate(adsId, adPlaybackState);
         notifyListeners(
@@ -2092,6 +2463,20 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
               adPlaybackState.withAdSkipInfo(
                   assetListData.adGroupIndex, adIndex, assetList.skipInfo);
         }
+        Log.d(
+            "HLSTEST",
+            "Asset list item interstitialId="
+                + assetListData.interstitial.id
+                + " adsId="
+                + assetListData.adsId
+                + " adGroup="
+                + assetListData.adGroupIndex
+                + " adIndex="
+                + adIndex
+                + " durationUs="
+                + asset.durationUs
+                + " uri="
+                + asset.uri);
       }
       adPlaybackState =
           adPlaybackState.withAdDurationsUs(assetListData.adGroupIndex, newDurationsUs);
@@ -2105,6 +2490,20 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
             adPlaybackState.withContentResumeOffsetUs(
                 assetListData.adGroupIndex, newContentResumeOffsetUs);
       }
+      Log.d(
+          "HLSTEST",
+          "Asset list resolved interstitialId="
+              + assetListData.interstitial.id
+              + " adsId="
+              + assetListData.adsId
+              + " adGroup="
+              + assetListData.adGroupIndex
+              + " startAdIndex="
+              + assetListData.adIndexInAdGroup
+              + " assetCount="
+              + assetList.assets.size()
+              + " sumDurationUs="
+              + sumOfAssetListAdDurationUs);
       putAndNotifyAdPlaybackStateUpdate(assetListData.adsId, adPlaybackState);
       notifyListeners(
           listener ->

@@ -24,6 +24,10 @@
   <androidx.media3.ui.PlayerView android:id="@+id/player_view"
       android:layout_width="match_parent"
       android:layout_height="match_parent"
+      app:auto_show="true"
+      app:hide_on_touch="false"
+      app:hide_during_ads="false"
+      app:show_timeout="0"
       app:show_shuffle_button="true"
       app:show_subtitle_button="true"/>
 
@@ -40,6 +44,18 @@
         android:paddingRight="4dp"
         android:textSize="10sp"
         tools:ignore="SmallSp"/>
+
+    <Button android:id="@+id/skipAd"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="Skip AD"
+      android:enabled="true"/>
+
+    <Button android:id="@+id/seekToAd"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="Seek to AD"
+      android:enabled="true"/>
 
     <LinearLayout android:id="@+id/controls_root"
         android:layout_width="match_parent"

@@ -693,8 +693,22 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
       return C.RESULT_NOTHING_READ;
     }
 
+    int readSourceChunkUid =
+        sampleQueueIndex == primarySampleQueueIndex
+            ? Ints.checkedCast(sampleQueues[sampleQueueIndex].peekSourceId())
+            : C.INDEX_UNSET;
     int result =
         sampleQueues[sampleQueueIndex].read(formatHolder, buffer, readFlags, loadingFinished);
+    if (sampleQueueIndex == primarySampleQueueIndex
+        && (result == C.RESULT_FORMAT_READ || result == C.RESULT_BUFFER_READ)) {
+      for (int i = 0; i < mediaChunks.size(); i++) {
+        HlsMediaChunk chunk = mediaChunks.get(i);
+        if (chunk.uid == readSourceChunkUid) {
+          HlsDebugInfo.setCurrentChunk(chunk);
+          break;
+        }
+      }
+    }
     if (result == C.RESULT_FORMAT_READ) {
       Format format = checkNotNull(formatHolder.format);
       if (sampleQueueIndex == primarySampleQueueIndex) {

@@ -25,7 +25,7 @@ public class TestDataSource implements DataSource {
 
   @Override
   public long open(DataSpec dataSpec) throws IOException {
-    Log.i("Gabriel", "open called for " + dataSpec.uri );
+    Log.i("HLSTEST", "open called for " + dataSpec.uri );
     return delegate.open(dataSpec);
   }
 
@@ -37,13 +37,13 @@ public class TestDataSource implements DataSource {
 
   @Override
   public void close() throws IOException {
-    Log.i("Gabriel", "close called for " + getUri());
+    Log.i("HLSTEST", "close called for " + getUri());
     delegate.close();
   }
 
   @Override
   public int read(byte[] buffer, int offset, int length) throws IOException {
-    Log.i("Gabriel", "read from offset = " + offset + " and length = " + length);
+//    Log.i("HLSTEST", "read from offset = " + offset + " and length = " + length);
     return delegate.read(buffer, offset, length);
   }
 }
