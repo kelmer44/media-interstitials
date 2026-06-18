@@ -1,5 +1,10 @@
 package androidx.media3.demo.main.ads;
 
+import static androidx.media3.common.AdPlaybackState.AD_STATE_AVAILABLE;
+import static androidx.media3.common.AdPlaybackState.AD_STATE_ERROR;
+import static androidx.media3.common.AdPlaybackState.AD_STATE_PLAYED;
+import static androidx.media3.common.AdPlaybackState.AD_STATE_SKIPPED;
+import static androidx.media3.common.AdPlaybackState.AD_STATE_UNAVAILABLE;
 import static androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION;
 import static androidx.media3.common.Player.DISCONTINUITY_REASON_INTERNAL;
 import static androidx.media3.common.Player.DISCONTINUITY_REASON_REMOVE;
@@ -204,8 +209,8 @@ public class AdsManager implements Player.Listener {
 
   private static boolean isSkippable(AdPlaybackState.AdGroup group) {
     for (int state : group.states) {
-      if (state == AdPlaybackState.AD_STATE_AVAILABLE
-          || state == AdPlaybackState.AD_STATE_UNAVAILABLE) {
+      if (state == AD_STATE_AVAILABLE
+          || state == AD_STATE_UNAVAILABLE) {
         return true;
       }
     }
@@ -214,13 +219,42 @@ public class AdsManager implements Player.Listener {
 
   private static boolean isReplayable(AdPlaybackState.AdGroup group) {
     for (int i = 0; i < group.states.length; i++) {
-      if ((group.states[i] == AdPlaybackState.AD_STATE_PLAYED
-              || group.states[i] == AdPlaybackState.AD_STATE_SKIPPED)
+      if ((group.states[i] == AD_STATE_PLAYED
+              || group.states[i] == AD_STATE_SKIPPED)
           && group.mediaItems[i] != null) {
         return true;
       }
     }
     return false;
+  }
+
+  private static String adStateForGroup(AdPlaybackState.AdGroup group) {
+    StringBuilder statesStr = new StringBuilder("");
+
+
+    for (int i = 0; i < group.states.length; i++) {
+      String thisState = "";
+      switch (group.states[i]) {
+        case AD_STATE_UNAVAILABLE:
+          thisState = "AD_STATE_UNAVAILABLE";
+          break;
+        case AD_STATE_AVAILABLE:
+          thisState = "AD_STATE_AVAILABLE";
+          break;
+        case AD_STATE_SKIPPED:
+          thisState = "AD_STATE_SKIPPED";
+          break;
+        case AD_STATE_PLAYED:
+          thisState = "AD_STATE_PLAYED";
+          break;
+        case AD_STATE_ERROR:
+          thisState = "AD_STATE_ERROR";
+          break;
+      }
+      statesStr.append(thisState);
+      statesStr.append(",");
+    }
+    return statesStr.toString();
   }
 
   public void skipAd() {
