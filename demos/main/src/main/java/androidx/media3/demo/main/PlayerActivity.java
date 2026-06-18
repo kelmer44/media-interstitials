@@ -103,6 +103,7 @@ public class PlayerActivity extends AppCompatActivity
   private List<MediaItem> mediaItems;
   private TrackSelectionParameters trackSelectionParameters;
   private DebugTextViewHelper debugViewHelper;
+  private @Nullable PlayerProgressListener progressListener;
   private Tracks lastSeenTracks;
   private boolean startAutoPlay;
   private int startItemIndex;
@@ -323,6 +324,9 @@ public class PlayerActivity extends AppCompatActivity
       configurePlayerWithServerSideAdsLoader();
       debugViewHelper = new DemoDebugTextViewHelper(player, debugTextView);
       debugViewHelper.start();
+      progressListener = new PlayerProgressListener(player);
+      progressListener.addCallback(adsManager);
+      progressListener.start();
     }
     boolean haveStartPosition = startItemIndex != C.INDEX_UNSET;
     if (haveStartPosition) {
@@ -446,6 +450,10 @@ public class PlayerActivity extends AppCompatActivity
       updateStartPosition();
       releaseServerSideAdsLoader();
       adsManager.setPlayer(null);
+      if (progressListener != null) {
+        progressListener.stop();
+        progressListener = null;
+      }
       debugViewHelper.stop();
       debugViewHelper = null;
       player.release();
