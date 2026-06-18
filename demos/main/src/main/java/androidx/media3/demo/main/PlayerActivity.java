@@ -47,6 +47,7 @@ import androidx.media3.common.util.Log;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.demo.main.ads.AdBreakTimelineView;
 import androidx.media3.demo.main.ads.AdsManager;
 import androidx.media3.demo.main.ads.AdsWizzAssetListResolverDataSourceFactory;
 import androidx.media3.demo.main.ads.HlsInterstitialListener;
@@ -91,6 +92,7 @@ public class PlayerActivity extends AppCompatActivity
   protected PlayerView playerView;
   protected LinearLayout debugRootView;
   protected TextView debugTextView;
+  protected AdBreakTimelineView adBreakTimelineView;
   protected @Nullable ExoPlayer player;
 
   private boolean isShowingTrackSelectionDialog;
@@ -130,6 +132,7 @@ public class PlayerActivity extends AppCompatActivity
     setContentView();
     debugRootView = findViewById(R.id.controls_root);
     debugTextView = findViewById(R.id.debug_text_view);
+    adBreakTimelineView = findViewById(R.id.ad_break_timeline);
     skipAdButton = findViewById(R.id.skipAd);
     seekToAdButton = findViewById(R.id.seekToAd);
     skipAdButton.setOnClickListener(this);
@@ -327,6 +330,7 @@ public class PlayerActivity extends AppCompatActivity
     }
     player.setMediaItems(mediaItems, /* resetPosition= */ !haveStartPosition);
     player.prepare();
+    updateAdBreakTimeline();
     String repeatModeExtra = intent.getStringExtra(IntentUtil.REPEAT_MODE_EXTRA);
     if (repeatModeExtra != null) {
       player.setRepeatMode(IntentUtil.parseRepeatModeExtra(repeatModeExtra));
@@ -447,6 +451,7 @@ public class PlayerActivity extends AppCompatActivity
       player.release();
       player = null;
       playerView.setPlayer(/* player= */ null);
+      updateAdBreakTimeline();
       mediaItems = Collections.emptyList();
       HlsDebugInfo.clearCurrentChunk();
       skippedInitialLiveJoinAds = false;
@@ -523,6 +528,12 @@ public class PlayerActivity extends AppCompatActivity
     Toast.makeText(getApplicationContext(), message, Toast.LENGTH_LONG).show();
   }
 
+  private void updateAdBreakTimeline() {
+    if (adBreakTimelineView != null) {
+      adBreakTimelineView.update(player);
+    }
+  }
+
   private final class DemoDebugTextViewHelper extends DebugTextViewHelper {
 
     private final ExoPlayer player;
@@ -538,6 +549,7 @@ public class PlayerActivity extends AppCompatActivity
 
     @Override
     protected String getPlayerStateString() {
+      updateAdBreakTimeline();
       @Nullable String currentChunkName = HlsDebugInfo.getCurrentChunkName();
       return super.getPlayerStateString()
           + " adState:"
@@ -645,8 +657,14 @@ public class PlayerActivity extends AppCompatActivity
   private class PlayerEventListener implements Player.Listener {
 
     @Override
+    public void onEvents(Player player, Player.Events events) {
+      updateAdBreakTimeline();
+    }
+
+    @Override
     public void onTimelineChanged(Timeline timeline, @Player.TimelineChangeReason int reason) {
 //      maybeSkipInitialLiveJoinAds(timeline);
+      updateAdBreakTimeline();
     }
 
 
@@ -694,6 +712,7 @@ public class PlayerActivity extends AppCompatActivity
         return;
       }
       playerView.setTimeBarScrubbingEnabled(mediaItem != null);
+      updateAdBreakTimeline();
     }
   }
 

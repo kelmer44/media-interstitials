@@ -45,6 +45,15 @@
         android:textSize="10sp"
         tools:ignore="SmallSp"/>
 
+    <androidx.media3.demo.main.ads.AdBreakTimelineView
+        android:id="@+id/ad_break_timeline"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"/>
+
     <Button android:id="@+id/skipAd"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
