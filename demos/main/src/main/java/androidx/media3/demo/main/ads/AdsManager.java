@@ -207,7 +207,7 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
           skippedAdGroups++;
         }
       } else if (isReplayable(group)) {
-        hlsInterstitialsAdsLoader.setWithAvailableAdGroup(i);
+        hlsInterstitialsAdsLoader.setWithResetAdGroup(i);
         rearmedAdGroups++;
       }
     }
@@ -236,8 +236,8 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
   private static boolean isReplayable(AdPlaybackState.AdGroup group) {
     for (int i = 0; i < group.states.length; i++) {
       if ((group.states[i] == AD_STATE_PLAYED
-          || group.states[i] == AD_STATE_SKIPPED)
-          && group.mediaItems[i] != null) {
+          || group.states[i] == AD_STATE_SKIPPED
+          || group.states[i] == AD_STATE_ERROR)) {
         return true;
       }
     }

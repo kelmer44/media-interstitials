@@ -92,7 +92,12 @@ public final class AdBreakTimelineView extends View {
           continue;
         }
         int color = getColor(adGroup);
-        adBreaks.add(new AdBreak(Math.max(0, startUs), Math.max(0, endUs), color, adGroupIndex));
+        adBreaks.add(
+            new AdBreak(
+                Math.max(0, startUs),
+                Math.max(0, endUs),
+                color,
+                /* displayNumber= */ adBreaks.size() + 1));
         derivedDurationUs = Math.max(derivedDurationUs, endUs);
       }
     }
@@ -114,8 +119,7 @@ public final class AdBreakTimelineView extends View {
     float right = getWidth() - getPaddingRight();
     float density = getResources().getDisplayMetrics().density;
     float textSize = Math.max(9f, getResources().getDisplayMetrics().scaledDensity * 10);
-    float labelBaseline = getPaddingTop() + textSize;
-    float adTop = labelBaseline + 4 * density;
+    float adTop = getPaddingTop() + 3 * density;
     float adBottom = getHeight() - getPaddingBottom() - 3 * density;
     float centerY = (adTop + adBottom) / 2f;
     float barHeight = Math.max(3f, (adBottom - adTop) * 0.18f);
@@ -137,8 +141,15 @@ public final class AdBreakTimelineView extends View {
       paint.setColor(COLOR_LABEL);
       paint.setTextAlign(Paint.Align.CENTER);
       paint.setTextSize(textSize);
+      Paint.FontMetrics fontMetrics = paint.getFontMetrics();
+      float adCenterY = (adTop + adBottom) / 2f;
+      float labelBaselineInAdBreak =
+          adCenterY - (fontMetrics.ascent + fontMetrics.descent) / 2f;
       canvas.drawText(
-          String.valueOf(adBreak.adGroupIndex), (adLeft + adRight) / 2f, labelBaseline, paint);
+          String.valueOf(adBreak.displayNumber),
+          (adLeft + adRight) / 2f,
+          labelBaselineInAdBreak,
+          paint);
     }
 
     float positionX = left + width * constrainToDuration(positionUs) / durationUs;
@@ -192,13 +203,13 @@ public final class AdBreakTimelineView extends View {
     public final long startUs;
     public final long endUs;
     public final int color;
-    public final int adGroupIndex;
+    public final int displayNumber;
 
-    public AdBreak(long startUs, long endUs, int color, int adGroupIndex) {
+    public AdBreak(long startUs, long endUs, int color, int displayNumber) {
       this.startUs = startUs;
       this.endUs = endUs;
       this.color = color;
-      this.adGroupIndex = adGroupIndex;
+      this.displayNumber = displayNumber;
     }
   }
 }
