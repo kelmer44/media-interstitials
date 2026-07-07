@@ -208,6 +208,7 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
         }
       } else if (isReplayable(group)) {
         hlsInterstitialsAdsLoader.setWithResetAdGroup(i);
+//        hlsInterstitialsAdsLoader.setWithAvailableAdGroup(i);
         rearmedAdGroups++;
       }
     }
