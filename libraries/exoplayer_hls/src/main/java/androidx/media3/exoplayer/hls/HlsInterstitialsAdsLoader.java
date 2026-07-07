@@ -855,7 +855,7 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       adPlaybackState = adPlaybackState.withResetAdGroup(adGroupIndex);
       Object adsId = checkNotNull(adPlaybackState.adsId);
 
-      // 1. add unresolved assets that werent in the list and might be now
+      // 1. add unresolved assets that werent in the list and qualify now
       maybeReadUnresolvedAssetListOfAdGroup(adsId, adPlaybackState.getAdGroup(adGroupIndex));
 
       // 2. Push ad playback state update with reset adState
@@ -876,6 +876,97 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
             msToUs(player.getContentPosition()));
       }
     }
+  }
+
+  /**
+   * Invalidates a previously discovered {@code X-ASSET-LIST} ad group and queues it for asset-list
+   * resolution again.
+   *
+   * <p>This is intended as a policy-neutral primitive for apps that want to re-request dynamic asset
+   * lists, for example after seeking back before an interstitial opportunity. Returns {@code false}
+   * if the group is not backed by a known {@code X-ASSET-LIST}.
+   */
+  public boolean invalidateAssetListAdGroup(int adGroupIndex) {
+    Player player = checkNotNull(this.player);
+    AdPlaybackState adPlaybackState = getAdPlaybackState();
+    if (adPlaybackState == null) {
+      return false;
+    }
+    checkArgument(adGroupIndex < adPlaybackState.adGroupCount);
+    AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndex);
+    if (adGroup.isLivePostrollPlaceholder()) {
+      return false;
+    }
+    Object adsId = checkNotNull(adPlaybackState.adsId);
+    long assetListTimeUs = adGroup.timeUs == C.TIME_END_OF_SOURCE ? Long.MAX_VALUE : adGroup.timeUs;
+    @Nullable
+    AssetListData oldAssetListData =
+        contentMediaSourceAdDataHolder.getAssetListDefinition(adsId, assetListTimeUs);
+    if (oldAssetListData == null || oldAssetListData.interstitial.assetListUri == null) {
+      return false;
+    }
+
+    AssetListData assetListData =
+        new AssetListData(
+            oldAssetListData.mediaItem,
+            adsId,
+            oldAssetListData.interstitial,
+            adGroupIndex,
+            /* adIndexInAdGroup= */ 0,
+            oldAssetListData.targetDurationUs);
+    AdGroup unresolvedAdGroup = createUnresolvedAssetListAdGroup(adGroup.timeUs, assetListData);
+    adPlaybackState = adPlaybackState.withReplacedAdGroup(adGroupIndex, unresolvedAdGroup);
+    checkNotNull(contentMediaSourceAdDataHolder.getUnresolvedAssetLists(adsId))
+        .put(assetListTimeUs, assetListData);
+    contentMediaSourceAdDataHolder.putAssetListDefinition(adsId, assetListTimeUs, assetListData);
+    putAndNotifyAdPlaybackStateUpdate(adsId, adPlaybackState);
+
+    Timeline timeline = player.getCurrentTimeline();
+    int mediaItemIndex = player.getCurrentMediaItemIndex();
+    if (!timeline.isEmpty() && mediaItemIndex >= 0 && mediaItemIndex < timeline.getWindowCount()) {
+      Window window = timeline.getWindow(mediaItemIndex, new Window());
+      long contentPositionUs = msToUs(player.getContentPosition());
+      long assetListWindowPositionUs =
+          assetListTimeUs == Long.MAX_VALUE
+              ? contentPositionUs
+              : assetListTimeUs - window.positionInFirstPeriodUs;
+      maybeExecuteOrSetNextAssetListResolutionMessage(
+          adsId,
+          timeline,
+          mediaItemIndex,
+          window.positionInFirstPeriodUs,
+          max(0, min(contentPositionUs, assetListWindowPositionUs)));
+    }
+    return true;
+  }
+
+  private static AdGroup createUnresolvedAssetListAdGroup(
+      long adGroupTimeUs, AssetListData assetListData) {
+    Interstitial interstitial = assetListData.interstitial;
+    long interstitialDurationUs =
+        resolveInterstitialDurationUs(interstitial, /* defaultDurationUs= */ C.TIME_UNSET);
+    long resumeOffsetUs =
+        interstitial.resumeOffsetUs != C.TIME_UNSET
+            ? interstitial.resumeOffsetUs
+            : (interstitialDurationUs != C.TIME_UNSET ? interstitialDurationUs : 0);
+    AdGroup adGroup =
+        new AdGroup(adGroupTimeUs)
+            .withAdCount(/* count= */ 1)
+            .withAdId(interstitial.id, /* index= */ 0)
+            .withAdDurationsUs(new long[] {interstitial.playoutLimitUs})
+            .withContentResumeOffsetUs(resumeOffsetUs);
+    if (interstitial.skipControlDurationUs != C.TIME_UNSET
+        || interstitial.skipControlOffsetUs != C.TIME_UNSET
+        || interstitial.skipControlLabelId != null) {
+      adGroup =
+          adGroup.withAdSkipInfo(
+              new SkipInfo(
+                  interstitial.skipControlOffsetUs,
+                  interstitial.skipControlDurationUs,
+                  interstitial.skipControlLabelId),
+              /* index= */ 0);
+    }
+    return adGroup;
   }
 
   private void maybeReadUnresolvedAssetListOfAdGroup(Object adsId, AdGroup adGroup) {
@@ -2296,10 +2387,14 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
         }
       } else if (reason == DISCONTINUITY_REASON_SEEK
           || reason == DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+
         long windowPositionUs = msToUs(newPosition.contentPositionMs);
         long assetListWindowPositionUs =
             getUnresolvedAssetListWindowPositionForContentPositionUs(
                 windowPositionUs, currentTimeline, newPosition.periodIndex);
+        Log.d(
+            "HLSTEST",
+            "Triggering maybeExecuteOrSetNextAssetListResolutionMessage after seek!");
         maybeExecuteOrSetNextAssetListResolutionMessage(
             adsId,
             currentTimeline,

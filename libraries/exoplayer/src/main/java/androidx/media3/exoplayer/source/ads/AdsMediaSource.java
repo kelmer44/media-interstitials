@@ -19,6 +19,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static java.lang.annotation.ElementType.TYPE_USE;
+import static java.lang.Math.min;
 
 import android.os.Handler;
 import android.os.Looper;
@@ -414,6 +415,7 @@ public final class AdsMediaSource extends CompositeMediaSource<MediaPeriodId> {
         adMediaSourceHolders =
             growAdMediaSourceHolderGrid(adMediaSourceHolders, adGroupInsertionCount);
       }
+      releaseObsoleteAdMediaSourceHolders(this.adPlaybackState, adPlaybackState);
       if (useAdMediaSourceClipping) {
         for (int i = 0; i < activeMediaSourceHolders.size(); i++) {
           AdMediaSourceHolder adMediaSourceHolder = activeMediaSourceHolders.get(i);
@@ -446,15 +448,72 @@ public final class AdsMediaSource extends CompositeMediaSource<MediaPeriodId> {
         break;
       }
       AdGroup newAdGroup = newAdPlaybackState.getAdGroup(i);
-      checkState(oldAdGroup.count <= newAdGroup.count);
       checkState(oldAdGroup.timeUs == newAdGroup.timeUs);
+      if (isInvalidatedAdGroup(newAdGroup)) {
+        continue;
+      }
+      checkState(oldAdGroup.count <= newAdGroup.count);
       for (int j = 0; j < oldAdGroup.count; j++) {
-        if (oldAdGroup.mediaItems[j] != null) {
+        if (oldAdGroup.mediaItems[j] != null && newAdGroup.mediaItems[j] != null) {
           checkState(oldAdGroup.mediaItems[j].equals(newAdGroup.mediaItems[j]));
         }
       }
     }
     return insertionCount;
+  }
+
+  private void releaseObsoleteAdMediaSourceHolders(
+      AdPlaybackState oldAdPlaybackState, AdPlaybackState newAdPlaybackState) {
+    int adGroupCount =
+        min(
+            min(oldAdPlaybackState.adGroupCount, newAdPlaybackState.adGroupCount),
+            adMediaSourceHolders.length);
+    for (int adGroupIndex = newAdPlaybackState.removedAdGroupCount;
+        adGroupIndex < adGroupCount;
+        adGroupIndex++) {
+      AdGroup oldAdGroup = oldAdPlaybackState.getAdGroup(adGroupIndex);
+      AdGroup newAdGroup = newAdPlaybackState.getAdGroup(adGroupIndex);
+      if (oldAdGroup.isLivePostrollPlaceholder()) {
+        break;
+      }
+      for (int adIndexInAdGroup = 0;
+          adIndexInAdGroup < adMediaSourceHolders[adGroupIndex].length;
+          adIndexInAdGroup++) {
+        @Nullable
+        AdMediaSourceHolder adMediaSourceHolder =
+            adMediaSourceHolders[adGroupIndex][adIndexInAdGroup];
+        if (adMediaSourceHolder == null || !adMediaSourceHolder.isInactive()) {
+          continue;
+        }
+        @Nullable MediaItem oldMediaItem =
+            adIndexInAdGroup < oldAdGroup.mediaItems.length
+                ? oldAdGroup.mediaItems[adIndexInAdGroup]
+                : null;
+        @Nullable MediaItem newMediaItem =
+            adIndexInAdGroup < newAdGroup.mediaItems.length
+                ? newAdGroup.mediaItems[adIndexInAdGroup]
+                : null;
+        if (oldMediaItem != null && !oldMediaItem.equals(newMediaItem)) {
+          adMediaSourceHolder.release();
+          adMediaSourceHolders[adGroupIndex][adIndexInAdGroup] = null;
+        }
+      }
+    }
+  }
+
+  private static boolean isInvalidatedAdGroup(AdGroup adGroup) {
+    if (adGroup.count <= 0) {
+      return false;
+    }
+    for (int i = 0; i < adGroup.count; i++) {
+      if (i >= adGroup.states.length
+          || i >= adGroup.mediaItems.length
+          || adGroup.states[i] != AdPlaybackState.AD_STATE_UNAVAILABLE
+          || adGroup.mediaItems[i] != null) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static @NullableType AdMediaSourceHolder[][] growAdMediaSourceHolderGrid(

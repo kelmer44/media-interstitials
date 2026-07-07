@@ -1163,6 +1163,22 @@ public final class AdPlaybackState {
   }
 
   /**
+   * Returns an instance with the ad group at {@code adGroupIndex} replaced by {@code adGroup}.
+   *
+   * <p>The replacement must keep the same {@link AdGroup#timeUs}.
+   */
+  @CheckResult
+  public AdPlaybackState withReplacedAdGroup(
+      @IntRange(from = 0) int adGroupIndex, AdGroup adGroup) {
+    int adjustedIndex = adGroupIndex - removedAdGroupCount;
+    checkArgument(adGroups[adjustedIndex].timeUs == adGroup.timeUs);
+    AdGroup[] adGroups = Util.nullSafeArrayCopy(this.adGroups, this.adGroups.length);
+    adGroups[adjustedIndex] = adGroup;
+    return new AdPlaybackState(
+        adsId, adGroups, adResumePositionUs, contentDurationUs, removedAdGroupCount);
+  }
+
+  /**
    * Returns an new instance that is a safe deep copy of this instance in case an immutable object
    * is used for {@link #adsId}.
    */
