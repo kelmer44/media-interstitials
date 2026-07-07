@@ -825,11 +825,8 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
   public void setWithSkippedAdGroup(int adGroupIndex) {
     checkState(this.player != null);
     AdPlaybackState adPlaybackState = getAdPlaybackState();
-    if (adPlaybackState != null) { Log.w(
-        "ADSMANAGER",
-        "Resetting ad "
-            + "at adGroupIndex="
-            + adGroupIndex);
+    if (adPlaybackState != null) {
+      Log.w("ADSMANAGER", "Resetting ad " + "at adGroupIndex=" + adGroupIndex);
       checkArgument(adGroupIndex < adPlaybackState.adGroupCount);
       adPlaybackState = adPlaybackState.withSkippedAdGroup(adGroupIndex);
       AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndex);
@@ -846,8 +843,8 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
    *
    * @param adGroupIndex The index of the ad group in the ad playback state.
    * @throws IllegalArgumentException if there is no ad group available for the given index.
-   * @throws IllegalStateException if called when the player {@linkplain #setPlayer(Player) is not
-   *     set}.
+   * @throws IllegalStateException    if called when the player {@linkplain #setPlayer(Player) is not
+   *                                  set}.
    */
   public void setWithResetAdGroup(int adGroupIndex) {
     Player player = checkNotNull(this.player);
@@ -859,7 +856,7 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       Object adsId = checkNotNull(adPlaybackState.adsId);
 
       // 1. add unresolved assets that werent in the list and might be now
-      maybeReaddUnresolvedAssetListOfAdGroup(adsId, adPlaybackState.getAdGroup(adGroupIndex));
+      maybeReadUnresolvedAssetListOfAdGroup(adsId, adPlaybackState.getAdGroup(adGroupIndex));
 
       // 2. Push ad playback state update with reset adState
       putAndNotifyAdPlaybackStateUpdate(adsId, adPlaybackState);
@@ -867,7 +864,8 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       // 3. Execute asset list resolution
       Timeline timeline = player.getCurrentTimeline();
       int mediaItemIndex = player.getCurrentMediaItemIndex();
-      if (!timeline.isEmpty() && mediaItemIndex >= 0 && mediaItemIndex < timeline.getWindowCount()) {
+      if (!timeline.isEmpty() && mediaItemIndex >= 0
+          && mediaItemIndex < timeline.getWindowCount()) {
         Window window = timeline.getWindow(mediaItemIndex, new Window());
 
         maybeExecuteOrSetNextAssetListResolutionMessage(
@@ -880,7 +878,7 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     }
   }
 
-  private void maybeReaddUnresolvedAssetListOfAdGroup(Object adsId, AdGroup adGroup) {
+  private void maybeReadUnresolvedAssetListOfAdGroup(Object adsId, AdGroup adGroup) {
     long assetListTimeUs = adGroup.timeUs == C.TIME_END_OF_SOURCE ? Long.MAX_VALUE : adGroup.timeUs;
     Map<Long, AssetListData> unresolvedAssetLists =
         contentMediaSourceAdDataHolder.getUnresolvedAssetLists(adsId);
@@ -1164,7 +1162,8 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
         // Check whether an asset list needs to be loaded.
         int currentPublicPeriodIndex = player.getCurrentPeriodIndex();
         long contentPositionUs = msToUs(player.getContentPosition());
-        Period publicPeriod = player.getCurrentTimeline().getPeriod(currentPublicPeriodIndex, new Period());
+        Period publicPeriod = player.getCurrentTimeline()
+            .getPeriod(currentPublicPeriodIndex, new Period());
         long publicPositionInFirstPeriod = -publicPeriod.positionInWindowUs;
         if (publicPeriod.isPlaceholder) {
           if (contentPositionUs >= window.durationUs) {
@@ -1207,11 +1206,10 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
                   + " windowPositionUs="
                   + contentPositionUs);
         }
-        maybeExecuteOrSetNextAssetListResolutionMessage(adsId, timeline, /* windowIndex= */ 0, publicPositionInFirstPeriod, contentPositionUs);
+        maybeExecuteOrSetNextAssetListResolutionMessage(adsId, timeline, /* windowIndex= */ 0,
+            publicPositionInFirstPeriod, contentPositionUs);
       }
     }
-
-
 
     boolean adPlaybackStateUpdated = putAndNotifyAdPlaybackStateUpdate(adsId, adPlaybackState);
     if (!contentMediaSourceAdDataHolder.isUnsupportedContentMediaSource(adsId)) {
@@ -1528,6 +1526,7 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
        * HERE resolves ONLY the first future ad.
        */
       if (periodPositionUs <= assetListTimeUs) {
+
         Log.d(
             "HLSTEST",
             "Selected unresolved asset-list adsId="
@@ -1869,11 +1868,11 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
       }
 
       long resolvedStartTimeUs =
-          isLive
-              ? resolveLiveInterstitialStartTimeUs(
-              interstitial, mediaPlaylist, windowDefaultPositionUs)
-              : resolveInterstitialStartTimeUs(interstitial, mediaPlaylist,
-                  windowDefaultPositionUs);
+//          isLive
+//              ? resolveLiveInterstitialStartTimeUs(interstitial, mediaPlaylist,
+//              windowDefaultPositionUs)
+//              :
+                  resolveInterstitialStartTimeUs(interstitial, mediaPlaylist, windowDefaultPositionUs);
 
       Log.w(
           "HLSTEST",
@@ -2098,8 +2097,7 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
               playlistTargetDurationUs);
       checkNotNull(contentMediaSourceAdDataHolder.getUnresolvedAssetLists(adsId))
           .put(assetListTimeUs, assetListData);
-      contentMediaSourceAdDataHolder.putAssetListDefinition(
-          adsId, assetListTimeUs, assetListData);
+      contentMediaSourceAdDataHolder.putAssetListDefinition(adsId, assetListTimeUs, assetListData);
     }
     return adPlaybackState;
   }
@@ -2555,7 +2553,9 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     }
 
     public void putAssetListDefinition(
-        Object adsId, long assetListTimeUs, AssetListData assetListData) {
+        Object adsId,
+        long assetListTimeUs,
+        AssetListData assetListData) {
       TreeMap<Long, AssetListData> assetListDataTreeMap = assetListDefinitions.get(adsId);
       if (assetListDataTreeMap != null) {
         assetListDataTreeMap.put(assetListTimeUs, assetListData);
