@@ -53,6 +53,7 @@ import androidx.media3.datasource.DataSchemeDataSource;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.demo.main.ads.AdBreakTimelineView;
 import androidx.media3.demo.main.ads.AdsManager;
+import androidx.media3.demo.main.ads.AdsWizzAssetListResolverDataSourceFactory;
 import androidx.media3.demo.main.ads.HlsInterstitialListener;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.RenderersFactory;
@@ -352,7 +353,16 @@ public class PlayerActivity extends AppCompatActivity
       serverSideAdLoaderBuilder.setAdsLoaderState(serverSideAdsLoaderState);
     }
     serverSideAdsLoader = serverSideAdLoaderBuilder.build();
-    hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(dataSourceFactory);
+    boolean useCustomDataSource = true;
+    Log.w("HLSTEST", "Using custom data source?" + useCustomDataSource);
+    if(!useCustomDataSource) {
+      hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(dataSourceFactory);
+    }
+    else {
+      AdsWizzAssetListResolverDataSourceFactory adsWizzAssetListResolverDataSourceFactory = new AdsWizzAssetListResolverDataSourceFactory(
+          getApplicationContext());
+      hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(adsWizzAssetListResolverDataSourceFactory);
+    }
     adsManager = new AdsManager(hlsInterstitialsAdsLoader);
     hlsInterstitialsAdsLoader.addListener(new HlsInterstitialListener());
 
