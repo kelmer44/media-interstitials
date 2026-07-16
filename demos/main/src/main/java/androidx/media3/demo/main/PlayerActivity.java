@@ -322,7 +322,7 @@ public class PlayerActivity extends AppCompatActivity
       playerView.setControllerHideOnTouch(false);
       playerView.showController();
       configurePlayerWithServerSideAdsLoader();
-      debugViewHelper = new DebugTextViewHelper(player, debugTextView);
+      debugViewHelper = new DemoDebugTextViewHelper(player, debugTextView);
       debugViewHelper.start();
       progressListener = new PlayerProgressListener(player);
       progressListener.addCallback(adsManager);
@@ -543,6 +543,39 @@ public class PlayerActivity extends AppCompatActivity
   private void updateAdBreakTimeline() {
     if (adBreakTimelineView != null) {
       adBreakTimelineView.update(player);
+    }
+  }
+
+  private final class DemoDebugTextViewHelper extends DebugTextViewHelper {
+
+    private final ExoPlayer player;
+
+    public DemoDebugTextViewHelper(ExoPlayer player, TextView textView) {
+      super(player, textView);
+      this.player = player;
+    }
+
+    public void refresh() {
+      updateAndPost();
+    }
+
+    @Override
+    protected String getPlayerStateString() {
+      updateAdBreakTimeline();
+      return super.getPlayerStateString()
+          + " adState:"
+          + getAdStateString();
+    }
+
+    private String getAdStateString() {
+      if (!player.isPlayingAd()) {
+        return "content";
+      }
+      return "playing(group:"
+          + player.getCurrentAdGroupIndex()
+          + " ad:"
+          + player.getCurrentAdIndexInAdGroup()
+          + ")";
     }
   }
   private static final class ScrubbableForwardingPlayer extends ForwardingPlayer {
