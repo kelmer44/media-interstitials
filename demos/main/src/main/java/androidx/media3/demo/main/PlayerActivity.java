@@ -45,6 +45,7 @@ import androidx.media3.common.Player;
 import androidx.media3.common.Timeline;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.util.ExperimentalApi;
 import androidx.media3.common.util.Log;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
@@ -319,7 +320,7 @@ public class PlayerActivity extends AppCompatActivity
     return true;
   }
 
-  @OptIn(markerClass = UnstableApi.class) // DRM configuration
+  @OptIn(markerClass = ExperimentalApi.class) // DRM configuration
   private MediaSource.Factory createMediaSourceFactory() {
     DefaultDrmSessionManagerProvider drmSessionManagerProvider = new DefaultDrmSessionManagerProvider();
     drmSessionManagerProvider.setDrmHttpDataSourceFactory(
@@ -344,7 +345,8 @@ public class PlayerActivity extends AppCompatActivity
     hlsInterstitialsAdsLoader.addListener(new HlsInterstitialListener());
 
     DefaultMediaSourceFactory defaultMediaSourceFactory = new DefaultMediaSourceFactory(this)
-        .setDataSourceFactory(dataSourceFactory);
+        .setDataSourceFactory(dataSourceFactory)
+        .setEnableClippingInMediaPeriod(true);
 
     HlsInterstitialsAdsLoader.AdsMediaSourceFactory hlsAdsMediaSourceFactory =
         new HlsInterstitialsAdsLoader.AdsMediaSourceFactory(
