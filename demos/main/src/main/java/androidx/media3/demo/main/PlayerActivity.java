@@ -354,7 +354,7 @@ public class PlayerActivity extends AppCompatActivity
       serverSideAdLoaderBuilder.setAdsLoaderState(serverSideAdsLoaderState);
     }
     serverSideAdsLoader = serverSideAdLoaderBuilder.build();
-    boolean useCustomDataSource = true;
+    boolean useCustomDataSource = false;
     Log.w("HLSTEST", "Using custom data source?" + useCustomDataSource);
     if(!useCustomDataSource) {
       hlsInterstitialsAdsLoader = new HlsInterstitialsAdsLoader(dataSourceFactory);
