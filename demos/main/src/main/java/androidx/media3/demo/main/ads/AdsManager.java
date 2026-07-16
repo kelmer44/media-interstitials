@@ -26,7 +26,11 @@ import androidx.media3.common.util.Util;
 import androidx.media3.demo.main.PlayerProgressListener;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.hls.HlsInterstitialsAdsLoader;
+import androidx.media3.exoplayer.hls.HlsManifest;
+import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist;
+import com.google.common.collect.ImmutableList;
 import java.util.Set;
+
 
 @UnstableApi
 public class AdsManager implements Player.Listener, PlayerProgressListener.Callback {
@@ -99,9 +103,36 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
 
   @Override
   public void onTimelineChanged(Timeline timeline, int reason) {
-    Log.w(TAG, "ADMANAGER - on timeline changed");
+    Log.w(TAG, "PREFETCH - on timeline changed");
     if (firstUpdate && !timeline.isEmpty()) {
       maybeSyncAdGroupsForInitialJoin(timeline);
+    }
+    Timeline.Window window = new Timeline.Window();
+
+    Object manifest = timeline.getWindow(0, window).manifest;
+    if(manifest instanceof HlsManifest) {
+      HlsManifest hlsManifest = (HlsManifest) timeline.getWindow(0,window).manifest;
+      newInterstitials(hlsManifest);
+    }
+
+  }
+
+  String PREFETCH_ID_KEY = "X-PREFETCH-ID";
+  private void newInterstitials(HlsManifest manifest) {
+    Log.d("PREFETCH", "New interstitials! " + manifest.mediaPlaylist.tags.size());
+
+    for (String tag: manifest.mediaPlaylist.tags) {
+      if(tag.startsWith("#EXT-X-DATERANGE:ID=\"prefetch")) {
+//      ImmutableList<HlsMediaPlaylist.ClientDefinedAttribute> attrs = interstitial.clientDefinedAttributes;
+        Log.d("PREFETCH", "daterange tag: " + tag);
+
+      }
+//      for (HlsMediaPlaylist.ClientDefinedAttribute attr : attrs) {
+//        Log.d("PREFETCH", "Found prefetch marker for "  + attr.name);
+//        if(attr.name.equals(PREFETCH_ID_KEY)) {
+//          Log.d("PREFETCH", "Found prefetch marker for "  + attr.getTextValue());
+//        }
+//      }
     }
   }
 
