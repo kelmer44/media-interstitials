@@ -49,6 +49,9 @@
         samples are written.
 *   IMA extension:
 *   Session:
+    *   Fix crash by catching `ForegroundServiceStartNotAllowedException` in
+        `MediaSessionService.stopSelfSafely()`
+        ([#3310](https://github.com/androidx/media/issues/3310)).
 *   UI:
     *   Introduce `PresentationState.videoAspectRatio` and make
         `Modifier.resizeWithContentScale` take `aspectRatio: Float?` instead of
@@ -89,6 +92,12 @@
     *   Fix bug where unconfigured live streams (`liveConfiguration == UNSET`)
         were queued as `STREAM_TYPE_BUFFERED`
         ([#3318](https://github.com/androidx/media/issues/3318)).
+    *   Introduce `SessionAvailabilityListener.SessionUnavailableReason` to
+        represent the reason for session unavailability, and provide an
+        overloaded method for
+        `SessionAvailabilityListener.onCastSessionUnavailable` to surface it.
+    *   Fix an issue where playback would unexpectedly resume locally after
+        stopping a Cast session.
 *   Test Utilities:
 *   Remove deprecated symbols:
 
