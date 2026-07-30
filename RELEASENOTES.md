@@ -4,6 +4,11 @@
 
 *   Common Library:
 *   ExoPlayer:
+    *   Move the flag to enable/disable HAGC metadata for progressive media from
+        `MediaSource.Factory` to `ExtractorsFactory`. The previous
+        `setExperimentalEnableHagcPlayback` method is removed and replaced by
+        `ExtractorsFactory.setParseHagcMetadata`. This also resolves an issue
+        where disabling didn't work for Matroska/WebM containers.
     *   Fix race condition in `PreCacheHelper` where canceling an ongoing
         preparation request could still start background downloads.
     *   Limit `setLoadOnlySelectedTracks(true)` on `ProgressiveMediaSource` and
@@ -17,16 +22,27 @@
         may cause additional buffering if unselected video or image tracks are
         newly enabled mid-playback.
 *   CompositionPlayer:
+    *   Support configuring the frame rate of video frame aggregation via
+        `Composition.Builder.setVideoFrameAggregationParameters` for playback
+        workflows.
 *   Transformer:
     *   Fix a segmentation fault during release by introducing
         `AssetLoader.stop()` and `AssetLoader.isStopped()` methods to verify
         that data production has halted before releasing the output surface.
         Custom `AssetLoader` implementations must implement these new methods.
+    *   Support configuring the frame rate of video frame aggregation via
+        `Composition.Builder.setVideoFrameAggregationParameters` for export
+        workflows.
 *   Track Selection:
 *   Extractors:
 *   Inspector:
 *   Inspector Frame:
 *   Audio:
+    *   Fix offload issue in which playback could stall during pre-roll or
+        gapless transitions due to limited hardware buffer sizes.
+    *   Fix bug in `DefaultAudioSink` where release count doesn't decrease when
+        playback thread is no longer alive
+        ([#3338](https://github.com/androidx/media/issues/3338)).
 *   Video:
     *   Fix reporting of late video frames with identical release timestamps so
         that they are reported as dropped instead of skipped.
@@ -38,6 +54,9 @@
 *   Effect:
 *   Effect Lottie:
 *   Muxers:
+    *   Write `mfra` (Movie Fragment Random Access) box at the end of fragmented
+        MP4 files to allow seeking via `FragmentedMp4Extractor` using
+        `FLAG_READ_MFRA_FOR_SEEK_MAP`.
     *   Fix crash in `Mp4Writer` when writing an EOS sample before any other
         samples are written.
 *   IMA extension:
@@ -55,6 +74,9 @@
 *   Cronet extension:
 *   RTMP extension:
 *   HLS extension:
+    *   Fix calculation of content resume offset when the target segment for
+        snapping is not yet in the playlist
+        ([#3322](https://github.com/androidx/media/issues/3322)).
 *   DASH extension:
     *   Support whitespace-separated lists of `@id` values in trick mode
         (`http://dashif.org/guidelines/trickmode`) descriptor `@value`
@@ -63,7 +85,11 @@
 *   RTSP extension:
     *   Fix an `IllegalStateException` crash that occurred when processing
         delayed network responses after the RTSP client was closed.
+    *   Fix issue where rapid scrubbing could incorrectly trigger the TCP
+        protocol fallback mechanic.
 *   Decoder extensions (FFmpeg, VP9, AV1, etc.):
+    *   Opus: Fix memory corruption when multiple `OpusDecoder` instances are
+        initialized concurrently.
 *   MIDI extension:
 *   Leanback extension:
 *   Cast extension:
