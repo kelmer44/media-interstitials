@@ -11,7 +11,6 @@ import androidx.media3.datasource.DataSourceUtil;
 import androidx.media3.datasource.DataSpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 import java.util.Objects;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -20,7 +19,6 @@ import org.json.JSONObject;
 @UnstableApi
 public class AdsWizzAssetListResolverDataSource extends BaseDataSource {
 
-  private static final String[] ASSET_NAMES = {"interstitial-2.ts", "interstitial-1.ts"};
   private static final String ASSETS_JSON_NAME = "ASSETS";
 
   private final DataSource.Factory upstreamDataSourceFactory;
@@ -44,9 +42,8 @@ public class AdsWizzAssetListResolverDataSource extends BaseDataSource {
     Uri requestUri = dataSpec.uri;
     this.uri = requestUri;
     try {
-      int assetCount = loadOriginalAssetCount(dataSpec);
-      Log.d("HLSTEST", "Original asset list contained " + assetCount + " assets.");
-      String jsonString = buildAssetListJson(requestUri, assetCount);
+      JSONObject assetList = loadOriginalAssetList(dataSpec);
+      String jsonString = buildAssetListJson(requestUri, assetList);
       Log.d("HLSTEST", "Returning asset list " + jsonString);
       // Saving whatever gets read in data to be read in [read]
       data = jsonString.getBytes(StandardCharsets.UTF_8);
@@ -68,38 +65,28 @@ public class AdsWizzAssetListResolverDataSource extends BaseDataSource {
     return bytesRemaining;
   }
 
-  private int loadOriginalAssetCount(DataSpec dataSpec) throws IOException, JSONException {
+  private JSONObject loadOriginalAssetList(DataSpec dataSpec) throws IOException, JSONException {
     DataSource upstreamDataSource = upstreamDataSourceFactory.createDataSource();
     try {
       upstreamDataSource.open(dataSpec);
       String originalJsonString =
           new String(DataSourceUtil.readToEnd(upstreamDataSource), StandardCharsets.UTF_8);
-      int assetCount = new JSONObject(originalJsonString).getJSONArray(ASSETS_JSON_NAME).length();
-      Log.d("HLSTEST", "Original asset list contains " + assetCount + " assets");
-      return assetCount;
+      JSONObject assetList = new JSONObject(originalJsonString);
+      Log.d("HLSTEST", "Original asset list contains "
+          + assetList.getJSONArray(ASSETS_JSON_NAME).length() + " assets");
+      return assetList;
     } finally {
       DataSourceUtil.closeQuietly(upstreamDataSource);
     }
   }
 
-  private static String buildAssetListJson(Uri requestUri, int assetCount) throws JSONException {
-    String interstitialId = requestUri.getQueryParameter("interstitialId");
-    if (interstitialId == null) {
-      interstitialId = "ad-break";
-    }
-
-    double assetDurationSeconds = 6.037333;
-    JSONArray assets = new JSONArray();
+  private static String buildAssetListJson(Uri requestUri, JSONObject assetList)
+      throws JSONException {
+    // Preserve the server's asset order, URIs, durations, and optional metadata.
+    JSONArray assets = assetList.getJSONArray(ASSETS_JSON_NAME);
     double totalDuration = 0.0;
-    for (int i = 0; i < assetCount; i++) {
-      assets.put(
-          buildAssetJson(
-              requestUri,
-              interstitialId,
-              ASSET_NAMES[i % ASSET_NAMES.length],
-              assetDurationSeconds,
-              i + 1));
-      totalDuration += assetDurationSeconds;
+    for (int i = 0; i < assets.length(); i++) {
+      totalDuration += assets.getJSONObject(i).getDouble("DURATION");
     }
 
     double targetDuration = Double.parseDouble(
@@ -115,7 +102,7 @@ public class AdsWizzAssetListResolverDataSource extends BaseDataSource {
       assets.put(shim(requestUri, missingDuration));
     }
 
-    return new JSONObject().put(ASSETS_JSON_NAME, assets).toString();
+    return assetList.toString();
   }
 
   private static JSONObject shim(Uri requestUri, double missingDuration) throws JSONException {
@@ -129,25 +116,6 @@ public class AdsWizzAssetListResolverDataSource extends BaseDataSource {
     return new JSONObject()
         .put("URI", assetPlaylistUri.toString())
         .put("DURATION", missingDuration);
-  }
-
-  private static JSONObject buildAssetJson(
-      Uri requestUri, String interstitialId, String asset, double durationSeconds, int position)
-      throws JSONException {
-    Uri assetPlaylistUri =
-        new Uri.Builder()
-            .scheme(requestUri.getScheme())
-            .encodedAuthority(requestUri.getEncodedAuthority())
-            .path("/interstitial.m3u8")
-            .appendQueryParameter("interstitialId", interstitialId)
-            .appendQueryParameter("asset", asset)
-            .appendQueryParameter("duration", String.format(Locale.US, "%.6f", durationSeconds))
-            .appendQueryParameter("position", String.valueOf(position))
-            .build();
-    Log.d("HLSTEST", "Returning asset Uri " + assetPlaylistUri);
-    return new JSONObject()
-        .put("URI", assetPlaylistUri.toString())
-        .put("DURATION", durationSeconds);
   }
 
   @Nullable
