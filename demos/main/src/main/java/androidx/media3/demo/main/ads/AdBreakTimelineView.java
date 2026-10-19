@@ -10,12 +10,21 @@ import android.view.View;
 import androidx.annotation.Nullable;
 import androidx.media3.common.AdPlaybackState;
 import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.common.Timeline;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
+import androidx.media3.exoplayer.hls.HlsManifest;
+import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist.Interstitial;
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 @UnstableApi
 public final class AdBreakTimelineView extends View {
@@ -34,6 +43,9 @@ public final class AdBreakTimelineView extends View {
   private final List<AdBreak> adBreaks;
   private final float markerMinWidthPx;
 
+  private final Map<String, Long> playoutLimitsUsById;
+  @Nullable private Object windowUid;
+
   private long durationUs;
   private long positionUs;
 
@@ -48,6 +60,7 @@ public final class AdBreakTimelineView extends View {
     paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     barRect = new RectF();
     adBreaks = new ArrayList<>();
+    playoutLimitsUsById = new HashMap<>();
     markerMinWidthPx = 4 * getResources().getDisplayMetrics().density;
   }
 
@@ -56,12 +69,16 @@ public final class AdBreakTimelineView extends View {
     durationUs = 0;
     positionUs = 0;
     if (player == null) {
+      playoutLimitsUsById.clear();
+      windowUid = null;
       invalidate();
       return;
     }
 
     Timeline timeline = player.getCurrentTimeline();
     if (timeline.isEmpty()) {
+      playoutLimitsUsById.clear();
+      windowUid = null;
       invalidate();
       return;
     }
@@ -73,6 +90,17 @@ public final class AdBreakTimelineView extends View {
     }
 
     timeline.getWindow(windowIndex, window);
+    if (!Objects.equals(windowUid, window.uid)) {
+      playoutLimitsUsById.clear();
+      windowUid = window.uid;
+    }
+    // Keep the declared limit separately: resolved ad durations can overwrite it.
+    if (window.manifest instanceof HlsManifest) {
+      for (Interstitial interstitial : ((HlsManifest) window.manifest).mediaPlaylist.interstitials) {
+        playoutLimitsUsById.put(interstitial.id, interstitial.playoutLimitUs);
+      }
+    }
+    Set<String> activeInterstitialIds = new HashSet<>();
     durationUs = resolveDurationUs(window, player);
     positionUs = Util.msToUs(player.getContentPosition());
     long derivedDurationUs = Math.max(durationUs, positionUs);
@@ -82,7 +110,7 @@ public final class AdBreakTimelineView extends View {
         periodIndex++) {
       timeline.getPeriod(periodIndex, period, true);
       AdPlaybackState adPlaybackState = period.adPlaybackState;
-      for (int adGroupIndex = 0;
+      for (int adGroupIndex = adPlaybackState.removedAdGroupCount;
           adGroupIndex < adPlaybackState.adGroupCount;
           adGroupIndex++) {
         AdPlaybackState.AdGroup adGroup = adPlaybackState.getAdGroup(adGroupIndex);
@@ -92,18 +120,45 @@ public final class AdBreakTimelineView extends View {
           continue;
         }
         int color = getColor(adGroup);
+        for (@Nullable String id : adGroup.ids) {
+          if (id != null) {
+            activeInterstitialIds.add(id);
+          }
+        }
         adBreaks.add(
             new AdBreak(
                 Math.max(0, startUs),
                 Math.max(0, endUs),
                 color,
-                /* displayNumber= */ adBreaks.size() + 1));
+                /* displayNumber= */ adBreaks.size() + 1,
+                "C = " + (adGroup.count == C.LENGTH_UNSET ? "?" : adGroup.count)
+                    + ", PL = " + getPlayoutLimitLabel(adGroup),
+                "Shim = " + getShimLabel(adGroup)));
         derivedDurationUs = Math.max(derivedDurationUs, endUs);
       }
     }
 
+    // Retain limits for visible groups after their dateranges leave the live playlist.
+    playoutLimitsUsById.keySet().retainAll(activeInterstitialIds);
     durationUs = derivedDurationUs;
     invalidate();
+  }
+
+  @Override
+  protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+    paint.setTextSize(getLabelTextSize());
+    Paint.FontMetrics metrics = paint.getFontMetrics();
+    int desiredHeight = (int) Math.ceil(
+        52 * getResources().getDisplayMetrics().density
+            + 2 * (metrics.descent - metrics.ascent)
+            + getPaddingTop() + getPaddingBottom());
+    setMeasuredDimension(
+        resolveSize(getSuggestedMinimumWidth(), widthMeasureSpec),
+        resolveSize(Math.max(getSuggestedMinimumHeight(), desiredHeight), heightMeasureSpec));
+  }
+
+  private float getLabelTextSize() {
+    return Math.max(9f, getResources().getDisplayMetrics().scaledDensity * 10);
   }
 
   @Override
@@ -118,9 +173,12 @@ public final class AdBreakTimelineView extends View {
     float left = getPaddingLeft();
     float right = getWidth() - getPaddingRight();
     float density = getResources().getDisplayMetrics().density;
-    float textSize = Math.max(9f, getResources().getDisplayMetrics().scaledDensity * 10);
+    float textSize = getLabelTextSize();
+    paint.setTextSize(textSize);
+    Paint.FontMetrics metrics = paint.getFontMetrics();
+    float lineHeight = metrics.descent - metrics.ascent;
     float adTop = getPaddingTop() + 3 * density;
-    float adBottom = getHeight() - getPaddingBottom() - 3 * density;
+    float adBottom = getHeight() - getPaddingBottom() - 7 * density - 2 * lineHeight;
     float centerY = (adTop + adBottom) / 2f;
     float barHeight = Math.max(3f, (adBottom - adTop) * 0.18f);
     barRect.set(left, centerY - barHeight / 2f, right, centerY + barHeight / 2f);
@@ -150,12 +208,75 @@ public final class AdBreakTimelineView extends View {
           (adLeft + adRight) / 2f,
           labelBaselineInAdBreak,
           paint);
+
+      if (adBreak.color == COLOR_PLACEHOLDER) {
+        continue;
+      }
+
+      // Use the space between neighboring marker centers for labels, including
+      // narrow break boxes, and compress text horizontally only when necessary.
+      float labelLeft = i == 0 ? left : (adLeft + adRight) / 4f
+          + getAdBreakCenterX(adBreaks.get(i - 1), left, width) / 2f;
+      float labelRight = i == adBreaks.size() - 1 ? right : (adLeft + adRight) / 4f
+          + getAdBreakCenterX(adBreaks.get(i + 1), left, width) / 2f;
+      float labelWidth = labelRight - labelLeft - 4 * density;
+      if (labelWidth <= 0) {
+        continue;
+      }
+      float textWidth = Math.max(paint.measureText(adBreak.details), paint.measureText(adBreak.shim));
+      paint.setTextScaleX(Math.min(1f, labelWidth / Math.max(1f, textWidth)));
+      float scaledWidth = Math.min(textWidth, labelWidth);
+      float labelX = Util.constrainValue(
+          (adLeft + adRight) / 2f,
+          labelLeft + 2 * density + scaledWidth / 2f,
+          labelRight - 2 * density - scaledWidth / 2f);
+      float baseline = adBottom + 4 * density - metrics.ascent;
+      canvas.drawText(adBreak.details, labelX, baseline, paint);
+      canvas.drawText(adBreak.shim, labelX, baseline + lineHeight, paint);
+      paint.setTextScaleX(1f);
     }
 
     float positionX = left + width * constrainToDuration(positionUs) / durationUs;
     paint.setColor(COLOR_POSITION);
     paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density));
-    canvas.drawLine(positionX, getPaddingTop(), positionX, getHeight() - getPaddingBottom(), paint);
+    canvas.drawLine(positionX, getPaddingTop(), positionX, adBottom, paint);
+  }
+
+  private float getAdBreakCenterX(AdBreak adBreak, float left, int width) {
+    return left + width * ((constrainToDuration(adBreak.startUs)
+        + constrainToDuration(adBreak.endUs)) / 2f) / durationUs;
+  }
+
+  private String getPlayoutLimitLabel(AdPlaybackState.AdGroup adGroup) {
+    Set<String> ids = new HashSet<>();
+    long totalLimitUs = 0;
+    for (@Nullable String id : adGroup.ids) {
+      if (id == null || !ids.add(id)) {
+        continue;
+      }
+      @Nullable Long limitUs = playoutLimitsUsById.get(id);
+      if (limitUs == null) {
+        return "?";
+      }
+      if (limitUs == C.TIME_UNSET) {
+        return "none";
+      }
+      totalLimitUs += limitUs;
+    }
+    return ids.isEmpty() ? "?"
+        : BigDecimal.valueOf(totalLimitUs, 6).stripTrailingZeros().toPlainString();
+  }
+
+  private static String getShimLabel(AdPlaybackState.AdGroup adGroup) {
+    boolean unresolved = adGroup.count == C.LENGTH_UNSET;
+    for (@Nullable MediaItem item : adGroup.mediaItems) {
+      if (item == null || item.localConfiguration == null) {
+        unresolved = true;
+      } else if ("/shim.m3u8".equals(item.localConfiguration.uri.getPath())) {
+        return "yes";
+      }
+    }
+    return unresolved ? "?" : "no";
   }
 
   private long getAdGroupWindowPositionUs(AdPlaybackState.AdGroup adGroup) {
@@ -204,12 +325,16 @@ public final class AdBreakTimelineView extends View {
     public final long endUs;
     public final int color;
     public final int displayNumber;
+    public final String details;
+    public final String shim;
 
-    public AdBreak(long startUs, long endUs, int color, int displayNumber) {
+    public AdBreak(long startUs, long endUs, int color, int displayNumber, String details, String shim) {
       this.startUs = startUs;
       this.endUs = endUs;
       this.color = color;
       this.displayNumber = displayNumber;
+      this.details = details;
+      this.shim = shim;
     }
   }
 }
