@@ -165,6 +165,54 @@ public class HlsInterstitialsAdsLoaderTest {
   }
 
   @Test
+  public void prefetchInterstitial_resolvesAheadOfSchedule_withoutRefetching() throws Exception {
+    PlayerMessage message =
+        new PlayerMessage(
+            mock(PlayerMessage.Sender.class),
+            mock(PlayerMessage.Target.class),
+            Timeline.EMPTY,
+            /* defaultMediaItemIndex= */ 0,
+            /* clock= */ null,
+            /* looper= */ null);
+    when(mockPlayer.createMessage(any())).thenReturn(message);
+    String playlist =
+        "#EXTM3U\n#EXT-X-TARGETDURATION:6\n"
+            + "#EXT-X-PROGRAM-DATE-TIME:2020-01-02T21:55:40.000Z\n"
+            + "#EXT-X-DATERANGE:ID=\"early\",CLASS=\"com.apple.hls.interstitial\","
+            + "START-DATE=\"2020-01-02T21:56:20.000Z\",X-ASSET-LIST=\"http://three-assets\"\n"
+            + "#EXTINF:90,\nmain.ts\n#EXT-X-ENDLIST\n";
+    callHandleContentTimelineChangedAndCaptureAdPlaybackState(
+        playlist,
+        adsLoader,
+        /* windowIndex= */ 0,
+        /* windowPositionInPeriodUs= */ 0,
+        /* windowEndPositionInPeriodUs= */ C.TIME_END_OF_SOURCE);
+    assertThat(assetListLoadingListener.completed()).isFalse();
+    assertThat(message.isCanceled()).isFalse();
+
+    assertThat(adsLoader.prefetchInterstitial("adsId", "early")).isTrue();
+    assertThat(message.isCanceled()).isTrue();
+    // A duplicate request while loading must not cause another ad decision.
+    assertThat(adsLoader.prefetchInterstitial("adsId", "early")).isFalse();
+    runMainLooperUntil(assetListLoadingListener::completed, TIMEOUT_MS, Clock.DEFAULT);
+    assertThat(adsLoader.prefetchInterstitial("adsId", "early")).isFalse();
+    verify(mockAdsLoaderListener, times(1))
+        .onAssetListLoadStarted(any(), any(), anyInt(), anyInt());
+    ArgumentCaptor<AdPlaybackState> captor = ArgumentCaptor.forClass(AdPlaybackState.class);
+    verify(mockEventListener, times(2)).onAdPlaybackState(captor.capture());
+    assertThat(captor.getValue().getAdGroup(0).count).isEqualTo(3);
+    assertThat(captor.getValue().getAdGroup(0).states[0]).isEqualTo(AD_STATE_AVAILABLE);
+    adsLoader.release();
+  }
+
+  @Test
+  public void prefetchInterstitial_unknownOrReleasedSession_returnsFalse() {
+    assertThat(adsLoader.prefetchInterstitial("missing", "ad")).isFalse();
+    adsLoader.release();
+    assertThat(adsLoader.prefetchInterstitial("missing", "ad")).isFalse();
+  }
+
+  @Test
   public void setSupportedContentTypes_hlsNotSupported_throwsIllegalArgumentException() {
     assertThrows(
         IllegalArgumentException.class,

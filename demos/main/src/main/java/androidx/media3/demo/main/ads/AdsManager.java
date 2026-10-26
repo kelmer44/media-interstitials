@@ -13,6 +13,7 @@ import static androidx.media3.common.Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
 import static androidx.media3.common.Player.DISCONTINUITY_REASON_SILENCE_SKIP;
 import static androidx.media3.common.Player.DISCONTINUITY_REASON_SKIP;
 
+import android.content.Context;
 import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
@@ -26,10 +27,6 @@ import androidx.media3.common.util.Util;
 import androidx.media3.demo.main.PlayerProgressListener;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.hls.HlsInterstitialsAdsLoader;
-import androidx.media3.exoplayer.hls.HlsManifest;
-import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist;
-import com.google.common.collect.ImmutableList;
-import java.util.Set;
 
 
 @UnstableApi
@@ -37,22 +34,29 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
   private static final String TAG = "AdsManager";
 
   private final HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader;
+  private final AdPrefetcher adPrefetcher;
   @Nullable
   private Player player;
 
   @OptIn(markerClass = UnstableApi.class)
-  public AdsManager(HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader) {
+  public AdsManager(Context context, HlsInterstitialsAdsLoader hlsInterstitialsAdsLoader) {
     this.hlsInterstitialsAdsLoader = hlsInterstitialsAdsLoader;
+    adPrefetcher = new AdPrefetcher(context, hlsInterstitialsAdsLoader);
 
   }
 
 
-  public void setPlayer(ExoPlayer player) {
+  public void setPlayer(@Nullable ExoPlayer player) {
     Log.w("ADMANAGER", "Setting player");
+    if (this.player != null) {
+      this.player.removeListener(this);
+    }
+    adPrefetcher.reset();
     this.player = player;
     if (this.player != null) {
       this.player.addListener(this);
     }
+    adPrefetcher.update(player);
   }
 
   @Override
@@ -89,6 +93,7 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
 
     Log.w(TAG, "ADMANAGER - onPositionDiscontinuity reason = " + strReason);
     maybeSyncAdGroupsForDiscontinuity(newPosition, reason);
+    adPrefetcher.update(player);
   }
 
   @Override
@@ -96,6 +101,7 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
     if (player != null && !player.isPlayingAd()) {
       maybeSyncAdGroupsForCurrentContentPosition();
     }
+    adPrefetcher.update(player);
   }
 
   private boolean firstUpdate = true;
@@ -107,33 +113,7 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
     if (firstUpdate && !timeline.isEmpty()) {
       maybeSyncAdGroupsForInitialJoin(timeline);
     }
-    Timeline.Window window = new Timeline.Window();
-
-    Object manifest = timeline.getWindow(0, window).manifest;
-    if(manifest instanceof HlsManifest) {
-      HlsManifest hlsManifest = (HlsManifest) timeline.getWindow(0,window).manifest;
-      newInterstitials(hlsManifest);
-    }
-
-  }
-
-  String PREFETCH_ID_KEY = "X-PREFETCH-ID";
-  private void newInterstitials(HlsManifest manifest) {
-    Log.d("PREFETCH", "New interstitials! " + manifest.mediaPlaylist.tags.size());
-
-    for (String tag: manifest.mediaPlaylist.tags) {
-      if(tag.startsWith("#EXT-X-DATERANGE:ID=\"prefetch")) {
-//      ImmutableList<HlsMediaPlaylist.ClientDefinedAttribute> attrs = interstitial.clientDefinedAttributes;
-        Log.d("PREFETCH", "daterange tag: " + tag);
-
-      }
-//      for (HlsMediaPlaylist.ClientDefinedAttribute attr : attrs) {
-//        Log.d("PREFETCH", "Found prefetch marker for "  + attr.name);
-//        if(attr.name.equals(PREFETCH_ID_KEY)) {
-//          Log.d("PREFETCH", "Found prefetch marker for "  + attr.getTextValue());
-//        }
-//      }
-    }
+    adPrefetcher.update(player);
   }
 
   /**
@@ -318,6 +298,6 @@ public class AdsManager implements Player.Listener, PlayerProgressListener.Callb
   @OptIn(markerClass = UnstableApi.class)
   @Override
   public void onProgress(PlayerProgressListener.Progress progress) {
-
+    adPrefetcher.update(player);
   }
 }

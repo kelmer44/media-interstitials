@@ -54,6 +54,9 @@ android {
 }
 
 dependencies {
+  testImplementation(project(":test-utils"))
+  testImplementation(project(":test-utils-robolectric"))
+  testImplementation(libs.robolectric)
   coreLibraryDesugaring(libs.desugar.jdk.libs)
   implementation(libs.androidx.annotation)
   implementation(libs.androidx.appcompat)

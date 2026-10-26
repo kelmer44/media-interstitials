@@ -19,6 +19,7 @@ import android.content.Context;
 import android.net.http.HttpEngine;
 import android.os.Build;
 import android.os.ext.SdkExtensions;
+import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.media3.database.DatabaseProvider;
@@ -29,6 +30,7 @@ import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpEngineDataSource;
 import androidx.media3.datasource.cache.Cache;
 import androidx.media3.datasource.cache.CacheDataSource;
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor;
 import androidx.media3.datasource.cache.NoOpCacheEvictor;
 import androidx.media3.datasource.cache.SimpleCache;
 import androidx.media3.datasource.cronet.CronetDataSource;
@@ -63,6 +65,9 @@ public final class DemoUtil {
 
   @OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
   private static @MonotonicNonNull Cache downloadCache;
+
+  @OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
+  private static @MonotonicNonNull Cache adPrefetchCache;
 
   @OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
   private static @MonotonicNonNull DownloadManager downloadManager;
@@ -124,9 +129,41 @@ public final class DemoUtil {
       context = context.getApplicationContext();
       DefaultDataSource.Factory upstreamFactory =
           new DefaultDataSource.Factory(context, getHttpDataSourceFactory(context));
-      dataSourceFactory = buildReadOnlyCacheDataSource(upstreamFactory, getDownloadCache(context));
+      CacheDataSource.Factory adCacheReader =
+          buildReadOnlyCacheDataSource(
+                  upstreamFactory, getAdPrefetchDataSourceFactory(context).getCache())
+              .setEventListener(
+                  new CacheDataSource.EventListener() {
+                    @Override
+                    public void onCachedBytesRead(long cacheSizeBytes, long cachedBytesRead) {
+                      Log.i(
+                          "AdPrefetch", "PREFETCH_CACHE_HIT playbackReadBytes=" + cachedBytesRead);
+                    }
+
+                    @Override
+                    public void onCacheIgnored(int reason) {
+                      Log.i("AdPrefetch", "PREFETCH_CACHE_IGNORED reason=" + reason);
+                    }
+                  });
+      dataSourceFactory = buildReadOnlyCacheDataSource(adCacheReader, getDownloadCache(context));
     }
     return dataSourceFactory;
+  }
+
+  /** Writable media-only prefetch cache; playback reads it without caching live manifests. */
+  @OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
+  public static synchronized CacheDataSource.Factory getAdPrefetchDataSourceFactory(
+      Context context) {
+    if (adPrefetchCache == null) {
+      adPrefetchCache =
+          new SimpleCache(
+              new File(context.getCacheDir(), "ad-prefetch"),
+              new LeastRecentlyUsedCacheEvictor(64L * 1024 * 1024),
+              getDatabaseProvider(context));
+    }
+    return new CacheDataSource.Factory()
+        .setCache(adPrefetchCache)
+        .setUpstreamDataSourceFactory(getHttpDataSourceFactory(context));
   }
 
   @OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)

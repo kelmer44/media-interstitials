@@ -1367,6 +1367,44 @@ public final class HlsInterstitialsAdsLoader implements AdsLoader {
     return isReleased;
   }
 
+  /**
+   * Starts resolving an unresolved asset list immediately, ahead of its normal schedule.
+   *
+   * <p>The result is published through the usual ad playback state and listener callbacks. Already
+   * resolved, loading, skipped or failed interstitials are not reset. This only resolves the asset
+   * list; it does not preload ad media or prepare decoders.
+   *
+   * <p>Must be called on this loader's application thread. If another asset list is loading,
+   * returns false without queuing the request; the caller may retry while prefetch is still useful.
+   *
+   * @param adsId The ads ID of the content source.
+   * @param interstitialId The ID of the interstitial to resolve.
+   * @return Whether a new asset-list request was started.
+   */
+  @CanIgnoreReturnValue
+  public boolean prefetchInterstitial(Object adsId, String interstitialId) {
+    checkState(Looper.myLooper() == handler.getLooper());
+    if (isReleased || (loader != null && loader.isLoading())) {
+      return false;
+    }
+    HlsAdSession session = adsMediaSourceSessionManager.getSession(adsId);
+    if (session == null) {
+      return false;
+    }
+    for (AssetListData data : session.unresolvedAssetLists.values()) {
+      if (data.interstitial.id.equals(interstitialId)) {
+        AdGroup group = session.adPlaybackState.getAdGroup(data.adGroupIndex);
+        if (group.states[data.adIndexInAdGroup] != AD_STATE_UNAVAILABLE) {
+          return false;
+        }
+        session.removeUnresolvedAssetList(data.adGroupTimeUs);
+        startLoadingAssetList(data);
+        return true;
+      }
+    }
+    return false;
+  }
+
   // private methods
 
   private void startLoadingAssetList(AssetListData assetListData) {

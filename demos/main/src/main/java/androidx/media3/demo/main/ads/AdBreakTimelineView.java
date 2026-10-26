@@ -3,6 +3,7 @@ package androidx.media3.demo.main.ads;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.util.AttributeSet;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -35,15 +37,17 @@ public final class AdBreakTimelineView extends View {
   private static final int COLOR_PLACEHOLDER = Color.rgb(33, 150, 243);
   private static final int COLOR_TIMELINE = Color.argb(180, 255, 255, 255);
   private static final int COLOR_POSITION = Color.WHITE;
+  private static final int COLOR_BUFFERED_POSITION = Color.rgb(0, 188, 212);
   private static final int COLOR_LABEL = Color.WHITE;
   private static final int COLOR_PREFETCH = Color.rgb(255, 193, 7);
 
   private final Timeline.Window window;
   private final Timeline.Period period;
   private final Paint paint;
+  private final DashPathEffect bufferedPositionDash;
   private final RectF barRect;
   private final List<AdBreak> adBreaks;
-  private final List<PrefetchRange> prefetchRanges;
+  private final List<Long> prefetchPositionsUs;
   private final float markerMinWidthPx;
 
   private final Map<String, Long> playoutLimitsUsById;
@@ -51,6 +55,7 @@ public final class AdBreakTimelineView extends View {
 
   private long durationUs;
   private long positionUs;
+  private long bufferedPositionUs;
 
   public AdBreakTimelineView(Context context) {
     this(context, null);
@@ -61,18 +66,21 @@ public final class AdBreakTimelineView extends View {
     window = new Timeline.Window();
     period = new Timeline.Period();
     paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    float density = getResources().getDisplayMetrics().density;
+    bufferedPositionDash = new DashPathEffect(new float[] {4 * density, 3 * density}, 0);
     barRect = new RectF();
     adBreaks = new ArrayList<>();
-    prefetchRanges = new ArrayList<>();
+    prefetchPositionsUs = new ArrayList<>();
     playoutLimitsUsById = new HashMap<>();
     markerMinWidthPx = 4 * getResources().getDisplayMetrics().density;
   }
 
   public void update(@Nullable Player player) {
     adBreaks.clear();
-    prefetchRanges.clear();
+    prefetchPositionsUs.clear();
     durationUs = 0;
     positionUs = 0;
+    bufferedPositionUs = 0;
     if (player == null) {
       playoutLimitsUsById.clear();
       windowUid = null;
@@ -102,7 +110,7 @@ public final class AdBreakTimelineView extends View {
     // Keep the declared limit separately: resolved ad durations can overwrite it.
     if (window.manifest instanceof HlsManifest) {
       HlsMediaPlaylist playlist = ((HlsManifest) window.manifest).mediaPlaylist;
-      readPrefetchRanges(playlist);
+      readPrefetchPositions(playlist);
       for (Interstitial interstitial : playlist.interstitials) {
         playoutLimitsUsById.put(interstitial.id, interstitial.playoutLimitUs);
       }
@@ -110,7 +118,8 @@ public final class AdBreakTimelineView extends View {
     Set<String> activeInterstitialIds = new HashSet<>();
     durationUs = resolveDurationUs(window, player);
     positionUs = Util.msToUs(player.getContentPosition());
-    long derivedDurationUs = Math.max(durationUs, positionUs);
+    bufferedPositionUs = Math.max(0, Util.msToUs(player.getContentBufferedPosition()));
+    long derivedDurationUs = Math.max(durationUs, Math.max(positionUs, bufferedPositionUs));
 
     for (int periodIndex = window.firstPeriodIndex;
         periodIndex <= window.lastPeriodIndex;
@@ -138,6 +147,7 @@ public final class AdBreakTimelineView extends View {
                 Math.max(0, endUs),
                 color,
                 /* displayNumber= */ adBreaks.size() + 1,
+                getAdBreakIdsLabel(adGroup),
                 "C = " + (adGroup.count == C.LENGTH_UNSET ? "?" : adGroup.count)
                     + ", PL = " + getPlayoutLimitLabel(adGroup),
                 "Shim = " + getShimLabel(adGroup)));
@@ -151,12 +161,11 @@ public final class AdBreakTimelineView extends View {
     invalidate();
   }
 
-  private void readPrefetchRanges(HlsMediaPlaylist playlist) {
+  private void readPrefetchPositions(HlsMediaPlaylist playlist) {
     for (PrefetchMarker marker : PrefetchMarker.parse(playlist)) {
       long startUs = marker.startDateUnixUs - playlist.startTimeUs;
-      long endUs = marker.endDateUnixUs - playlist.startTimeUs;
-      if (endUs >= 0) {
-        prefetchRanges.add(new PrefetchRange(startUs, endUs));
+      if (startUs >= 0) {
+        prefetchPositionsUs.add(startUs);
       }
     }
   }
@@ -167,7 +176,7 @@ public final class AdBreakTimelineView extends View {
     Paint.FontMetrics metrics = paint.getFontMetrics();
     int desiredHeight = (int) Math.ceil(
         52 * getResources().getDisplayMetrics().density
-            + 2 * (metrics.descent - metrics.ascent)
+            + 4 * (metrics.descent - metrics.ascent)
             + getPaddingTop() + getPaddingBottom());
     setMeasuredDimension(
         resolveSize(getSuggestedMinimumWidth(), widthMeasureSpec),
@@ -194,29 +203,25 @@ public final class AdBreakTimelineView extends View {
     paint.setTextSize(textSize);
     Paint.FontMetrics metrics = paint.getFontMetrics();
     float lineHeight = metrics.descent - metrics.ascent;
-    float adTop = getPaddingTop() + 9 * density;
-    float adBottom = getHeight() - getPaddingBottom() - 7 * density - 2 * lineHeight;
+    float headerBaseline = getPaddingTop() - metrics.ascent;
+    paint.setColor(COLOR_POSITION);
+    paint.setTextAlign(Paint.Align.LEFT);
+    canvas.drawText(
+        String.format(Locale.US, "Playhead %.1fs", positionUs / 1_000_000.0),
+        left, headerBaseline, paint);
+    paint.setColor(COLOR_BUFFERED_POSITION);
+    paint.setTextAlign(Paint.Align.RIGHT);
+    canvas.drawText(
+        String.format(Locale.US, "Buffered %.1fs", bufferedPositionUs / 1_000_000.0),
+        right, headerBaseline, paint);
+
+    float adTop = getPaddingTop() + lineHeight + 9 * density;
+    float adBottom = getHeight() - getPaddingBottom() - 7 * density - 3 * lineHeight;
     float centerY = (adTop + adBottom) / 2f;
     float barHeight = Math.max(3f, (adBottom - adTop) * 0.18f);
     barRect.set(left, centerY - barHeight / 2f, right, centerY + barHeight / 2f);
     paint.setColor(COLOR_TIMELINE);
     canvas.drawRoundRect(barRect, barHeight / 2f, barHeight / 2f, paint);
-
-    paint.setColor(COLOR_PREFETCH);
-    paint.setStrokeWidth(3 * density);
-    float prefetchY = getPaddingTop() + 3 * density;
-    for (PrefetchRange range : prefetchRanges) {
-      if (range.startUs > durationUs) {
-        continue;
-      }
-      float prefetchLeft = left + width * constrainToDuration(range.startUs) / durationUs;
-      float prefetchRight = left + width * constrainToDuration(range.endUs) / durationUs;
-      if (prefetchRight - prefetchLeft < markerMinWidthPx) {
-        prefetchRight = Math.min(right, prefetchLeft + markerMinWidthPx);
-        prefetchLeft = Math.max(left, prefetchRight - markerMinWidthPx);
-      }
-      canvas.drawLine(prefetchLeft, prefetchY, prefetchRight, prefetchY, paint);
-    }
 
     for (int i = 0; i < adBreaks.size(); i++) {
       AdBreak adBreak = adBreaks.get(i);
@@ -256,7 +261,10 @@ public final class AdBreakTimelineView extends View {
       if (labelWidth <= 0) {
         continue;
       }
-      float textWidth = Math.max(paint.measureText(adBreak.details), paint.measureText(adBreak.shim));
+      float textWidth =
+          Math.max(
+              paint.measureText(adBreak.ids),
+              Math.max(paint.measureText(adBreak.details), paint.measureText(adBreak.shim)));
       paint.setTextScaleX(Math.min(1f, labelWidth / Math.max(1f, textWidth)));
       float scaledWidth = Math.min(textWidth, labelWidth);
       float labelX = Util.constrainValue(
@@ -264,15 +272,34 @@ public final class AdBreakTimelineView extends View {
           labelLeft + 2 * density + scaledWidth / 2f,
           labelRight - 2 * density - scaledWidth / 2f);
       float baseline = adBottom + 4 * density - metrics.ascent;
-      canvas.drawText(adBreak.details, labelX, baseline, paint);
-      canvas.drawText(adBreak.shim, labelX, baseline + lineHeight, paint);
+      canvas.drawText(adBreak.ids, labelX, baseline, paint);
+      canvas.drawText(adBreak.details, labelX, baseline + lineHeight, paint);
+      canvas.drawText(adBreak.shim, labelX, baseline + 2 * lineHeight, paint);
       paint.setTextScaleX(1f);
     }
+
+    float markerTop = getPaddingTop() + lineHeight;
+    paint.setColor(COLOR_PREFETCH);
+    paint.setStrokeWidth(Math.max(2f, density));
+    for (long prefetchPositionUs : prefetchPositionsUs) {
+      if (prefetchPositionUs > durationUs) {
+        continue;
+      }
+      float prefetchX = left + width * prefetchPositionUs / durationUs;
+      canvas.drawLine(prefetchX, markerTop, prefetchX, adBottom, paint);
+    }
+
+    float bufferedPositionX = left + width * constrainToDuration(bufferedPositionUs) / durationUs;
+    paint.setColor(COLOR_BUFFERED_POSITION);
+    paint.setStrokeWidth(Math.max(2f, density));
+    paint.setPathEffect(bufferedPositionDash);
+    canvas.drawLine(bufferedPositionX, markerTop, bufferedPositionX, adBottom, paint);
+    paint.setPathEffect(null);
 
     float positionX = left + width * constrainToDuration(positionUs) / durationUs;
     paint.setColor(COLOR_POSITION);
     paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density));
-    canvas.drawLine(positionX, getPaddingTop(), positionX, adBottom, paint);
+    canvas.drawLine(positionX, markerTop, positionX, adBottom, paint);
   }
 
   private float getAdBreakCenterX(AdBreak adBreak, float left, int width) {
@@ -298,6 +325,21 @@ public final class AdBreakTimelineView extends View {
     }
     return ids.isEmpty() ? "?"
         : BigDecimal.valueOf(totalLimitUs, 6).stripTrailingZeros().toPlainString();
+  }
+
+  private static String getAdBreakIdsLabel(AdPlaybackState.AdGroup adGroup) {
+    Set<String> seenIds = new HashSet<>();
+    StringBuilder label = new StringBuilder();
+    for (@Nullable String id : adGroup.ids) {
+      if (id == null || id.isEmpty() || !seenIds.add(id)) {
+        continue;
+      }
+      if (label.length() > 0) {
+        label.append(", ");
+      }
+      label.append(id);
+    }
+    return label.length() == 0 ? "ID = ?" : label.toString();
   }
 
   private static String getShimLabel(AdPlaybackState.AdGroup adGroup) {
@@ -358,26 +400,25 @@ public final class AdBreakTimelineView extends View {
     public final long endUs;
     public final int color;
     public final int displayNumber;
+    public final String ids;
     public final String details;
     public final String shim;
 
-    public AdBreak(long startUs, long endUs, int color, int displayNumber, String details, String shim) {
+    public AdBreak(
+        long startUs,
+        long endUs,
+        int color,
+        int displayNumber,
+        String ids,
+        String details,
+        String shim) {
       this.startUs = startUs;
       this.endUs = endUs;
       this.color = color;
       this.displayNumber = displayNumber;
+      this.ids = ids;
       this.details = details;
       this.shim = shim;
-    }
-  }
-
-  private static final class PrefetchRange {
-    public final long startUs;
-    public final long endUs;
-
-    public PrefetchRange(long startUs, long endUs) {
-      this.startUs = startUs;
-      this.endUs = endUs;
     }
   }
 }
