@@ -16,6 +16,7 @@ import androidx.media3.common.Timeline;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
 import androidx.media3.exoplayer.hls.HlsManifest;
+import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist;
 import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist.Interstitial;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -35,12 +36,14 @@ public final class AdBreakTimelineView extends View {
   private static final int COLOR_TIMELINE = Color.argb(180, 255, 255, 255);
   private static final int COLOR_POSITION = Color.WHITE;
   private static final int COLOR_LABEL = Color.WHITE;
+  private static final int COLOR_PREFETCH = Color.rgb(255, 193, 7);
 
   private final Timeline.Window window;
   private final Timeline.Period period;
   private final Paint paint;
   private final RectF barRect;
   private final List<AdBreak> adBreaks;
+  private final List<PrefetchRange> prefetchRanges;
   private final float markerMinWidthPx;
 
   private final Map<String, Long> playoutLimitsUsById;
@@ -60,12 +63,14 @@ public final class AdBreakTimelineView extends View {
     paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     barRect = new RectF();
     adBreaks = new ArrayList<>();
+    prefetchRanges = new ArrayList<>();
     playoutLimitsUsById = new HashMap<>();
     markerMinWidthPx = 4 * getResources().getDisplayMetrics().density;
   }
 
   public void update(@Nullable Player player) {
     adBreaks.clear();
+    prefetchRanges.clear();
     durationUs = 0;
     positionUs = 0;
     if (player == null) {
@@ -96,7 +101,9 @@ public final class AdBreakTimelineView extends View {
     }
     // Keep the declared limit separately: resolved ad durations can overwrite it.
     if (window.manifest instanceof HlsManifest) {
-      for (Interstitial interstitial : ((HlsManifest) window.manifest).mediaPlaylist.interstitials) {
+      HlsMediaPlaylist playlist = ((HlsManifest) window.manifest).mediaPlaylist;
+      readPrefetchRanges(playlist);
+      for (Interstitial interstitial : playlist.interstitials) {
         playoutLimitsUsById.put(interstitial.id, interstitial.playoutLimitUs);
       }
     }
@@ -144,6 +151,16 @@ public final class AdBreakTimelineView extends View {
     invalidate();
   }
 
+  private void readPrefetchRanges(HlsMediaPlaylist playlist) {
+    for (PrefetchMarker marker : PrefetchMarker.parse(playlist)) {
+      long startUs = marker.startDateUnixUs - playlist.startTimeUs;
+      long endUs = marker.endDateUnixUs - playlist.startTimeUs;
+      if (endUs >= 0) {
+        prefetchRanges.add(new PrefetchRange(startUs, endUs));
+      }
+    }
+  }
+
   @Override
   protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
     paint.setTextSize(getLabelTextSize());
@@ -177,13 +194,29 @@ public final class AdBreakTimelineView extends View {
     paint.setTextSize(textSize);
     Paint.FontMetrics metrics = paint.getFontMetrics();
     float lineHeight = metrics.descent - metrics.ascent;
-    float adTop = getPaddingTop() + 3 * density;
+    float adTop = getPaddingTop() + 9 * density;
     float adBottom = getHeight() - getPaddingBottom() - 7 * density - 2 * lineHeight;
     float centerY = (adTop + adBottom) / 2f;
     float barHeight = Math.max(3f, (adBottom - adTop) * 0.18f);
     barRect.set(left, centerY - barHeight / 2f, right, centerY + barHeight / 2f);
     paint.setColor(COLOR_TIMELINE);
     canvas.drawRoundRect(barRect, barHeight / 2f, barHeight / 2f, paint);
+
+    paint.setColor(COLOR_PREFETCH);
+    paint.setStrokeWidth(3 * density);
+    float prefetchY = getPaddingTop() + 3 * density;
+    for (PrefetchRange range : prefetchRanges) {
+      if (range.startUs > durationUs) {
+        continue;
+      }
+      float prefetchLeft = left + width * constrainToDuration(range.startUs) / durationUs;
+      float prefetchRight = left + width * constrainToDuration(range.endUs) / durationUs;
+      if (prefetchRight - prefetchLeft < markerMinWidthPx) {
+        prefetchRight = Math.min(right, prefetchLeft + markerMinWidthPx);
+        prefetchLeft = Math.max(left, prefetchRight - markerMinWidthPx);
+      }
+      canvas.drawLine(prefetchLeft, prefetchY, prefetchRight, prefetchY, paint);
+    }
 
     for (int i = 0; i < adBreaks.size(); i++) {
       AdBreak adBreak = adBreaks.get(i);
@@ -335,6 +368,16 @@ public final class AdBreakTimelineView extends View {
       this.displayNumber = displayNumber;
       this.details = details;
       this.shim = shim;
+    }
+  }
+
+  private static final class PrefetchRange {
+    public final long startUs;
+    public final long endUs;
+
+    public PrefetchRange(long startUs, long endUs) {
+      this.startUs = startUs;
+      this.endUs = endUs;
     }
   }
 }
